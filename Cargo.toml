@@ -6,3 +6,5 @@ description = "Graphics library inspired by Macroquad."
 license-file = "./LICENSE"
 
 [dependencies]
+vulkano = "0.35.2"
+vulkano-shaders = "0.35.0"
