@@ -15,7 +15,7 @@ use vulkano::{
     memory::allocator::StandardMemoryAllocator,
 };
 
-use crate::backend::buffer::{Buffer, Intent};
+use crate::backend::buffer::{Buffer, constant::ConstantBuffer, variable::VariableBuffer};
 
 #[derive(Clone, Debug)]
 pub struct Context {
@@ -41,12 +41,17 @@ impl Context {
             command_allocator,
         }
     }
-    pub fn create_buffer_from_data<T: BufferContents + Copy>(
+    pub fn create_variable_buffer<T: BufferContents + Copy>(
         &self,
         data: &[T],
-        intent: Intent,
-    ) -> Buffer<T> {
-        Buffer::<T>::from_data(Arc::new(self.clone()), data, intent)
+    ) -> VariableBuffer<T> {
+        VariableBuffer::from_data(self.clone(), data)
+    }
+    pub fn create_constant_buffer<T: BufferContents + Copy>(
+        &self,
+        data: &[T],
+    ) -> ConstantBuffer<T> {
+        ConstantBuffer::from_data(self.clone(), data)
     }
     fn create_physical_device() -> Arc<PhysicalDevice> {
         let library = VulkanLibrary::new().expect("No local Vulkan library found.");
