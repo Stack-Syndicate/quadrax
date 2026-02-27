@@ -15,7 +15,7 @@ use vulkano::{
     memory::allocator::StandardMemoryAllocator,
 };
 
-use crate::backend::buffer::{Buffer, constant::ConstantBuffer, variable::VariableBuffer};
+use crate::backend::buffer::{Buffer, coherent::CoherentBuffer};
 
 #[derive(Clone, Debug)]
 pub struct Context {
@@ -41,18 +41,13 @@ impl Context {
             command_allocator,
         }
     }
-    pub fn create_variable_buffer<T: BufferContents + Copy>(
+    pub fn create_coherent_buffer<T: BufferContents + Copy>(
         &self,
         data: &[T],
-    ) -> VariableBuffer<T> {
-        VariableBuffer::from_data(self.clone(), data)
+    ) -> CoherentBuffer<T> {
+        CoherentBuffer::from_data(self.clone(), data)
     }
-    pub fn create_constant_buffer<T: BufferContents + Copy>(
-        &self,
-        data: &[T],
-    ) -> ConstantBuffer<T> {
-        ConstantBuffer::from_data(self.clone(), data)
-    }
+
     fn create_physical_device() -> Arc<PhysicalDevice> {
         let library = VulkanLibrary::new().expect("No local Vulkan library found.");
         let instance = Instance::new(
