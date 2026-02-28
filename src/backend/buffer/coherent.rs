@@ -10,7 +10,7 @@ use crate::backend::{
 
 pub struct CoherentBuffer<T: BufferContents + Copy> {
     ctx: Context,
-    inner: Subbuffer<[T]>,
+    pub inner: Subbuffer<[T]>,
 }
 impl<T: BufferContents + Copy> Buffer<T> for CoherentBuffer<T> {
     fn from_data(ctx: Context, data: &[T]) -> Self {

@@ -1,0 +1,58 @@
+#version 450
+layout(local_size_x = 128) in;
+
+const uint OP_ADD = 0;
+const uint OP_SUB = 1;
+const uint OP_DOT = 2;
+const uint OP_MUL = 3;
+const uint OP_CROSS = 4;
+const uint OP_DISTANCE = 5;
+
+layout(std430, binding = 0) buffer A {
+  vec4 a[];
+};
+layout(std430, binding = 1) buffer B {
+  vec4 b[];
+};
+layout(std430, binding = 2) buffer C {
+  vec4 c[];
+};
+
+layout(push_constant) uniform PushConstants {
+  uint op_code;
+  uint count;
+} push;
+
+void main() {
+  uint idx = gl_GlobalInvocationID.x;
+  if (idx >= push.count) {
+    return;
+  }
+  vec4 v1 = a[idx];
+  vec4 v2 = b[idx];
+  vec4 result = vec4(0.0);
+  switch (push.op_code) {
+    case OP_ADD:
+    result = v1 + v2;
+    break;
+    case OP_SUB:
+    result = v1 - v2;
+    break;
+    case OP_DOT:
+    result = vec4(dot(v1, v2));
+    break;
+    case OP_MUL:
+    result = v1 * v2;
+    break;
+    case OP_CROSS:
+    result = vec4(cross(v1.xyz, v2.xyz), 0.0);
+    break;
+    case OP_DISTANCE:
+    result = vec4(distance(v1, v2));
+    break;
+    default:
+    result = vec4(-1.0);
+    break;
+  }
+  c[idx] = result;
+}

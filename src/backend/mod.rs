@@ -15,7 +15,7 @@ use vulkano::{
     memory::allocator::StandardMemoryAllocator,
 };
 
-use crate::backend::buffer::{Buffer, coherent::CoherentBuffer};
+use crate::backend::buffer::{Buffer, coherent::CoherentBuffer, staged::StagedBuffer};
 
 #[derive(Clone, Debug)]
 pub struct Context {
@@ -47,7 +47,9 @@ impl Context {
     ) -> CoherentBuffer<T> {
         CoherentBuffer::from_data(self.clone(), data)
     }
-
+    pub fn create_staged_buffer<T: BufferContents + Copy>(&self, data: &[T]) -> StagedBuffer<T> {
+        StagedBuffer::from_data(self.clone(), data)
+    }
     fn create_physical_device() -> Arc<PhysicalDevice> {
         let library = VulkanLibrary::new().expect("No local Vulkan library found.");
         let instance = Instance::new(

@@ -2,7 +2,7 @@ use vulkano::{
     buffer::{BufferContents, BufferCreateInfo, BufferUsage, Subbuffer},
     command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, CopyBufferInfo},
     memory::allocator::{AllocationCreateInfo, MemoryTypeFilter},
-    sync::{GpuFuture, future::NowFuture, now},
+    sync::{GpuFuture, now},
 };
 
 use crate::backend::{
@@ -12,8 +12,8 @@ use crate::backend::{
 
 pub struct StagedBuffer<T: BufferContents + Copy> {
     ctx: Context,
-    inner: Subbuffer<[T]>,
-    staging: Subbuffer<[T]>,
+    pub inner: Subbuffer<[T]>,
+    pub staging: Subbuffer<[T]>,
 }
 impl<T: BufferContents + Copy> Buffer<T> for StagedBuffer<T> {
     fn from_data(ctx: Context, data: &[T]) -> Self {
@@ -25,13 +25,14 @@ impl<T: BufferContents + Copy> Buffer<T> for StagedBuffer<T> {
             },
             AllocationCreateInfo {
                 memory_type_filter: MemoryTypeFilter::PREFER_HOST
-                    | MemoryTypeFilter::HOST_RANDOM_ACCESS,
+                    | MemoryTypeFilter::HOST_RANDOM_ACCESS
+                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
                 ..Default::default()
             },
             data.iter().copied(),
         )
         .expect("Failed to create staged buffer.");
-        let buffer = vulkano::buffer::Buffer::from_iter(
+        let buffer = vulkano::buffer::Buffer::new_slice(
             ctx.memory_allocator.clone(),
             BufferCreateInfo {
                 usage: BufferUsage::STORAGE_BUFFER
@@ -43,14 +44,16 @@ impl<T: BufferContents + Copy> Buffer<T> for StagedBuffer<T> {
                 memory_type_filter: MemoryTypeFilter::PREFER_DEVICE,
                 ..Default::default()
             },
-            data.iter().copied(),
+            data.len() as u64,
         )
         .expect("Failed to create device-local buffer.");
-        Self {
+        let mut new_buffer = Self {
             ctx,
             inner: buffer,
             staging,
-        }
+        };
+        new_buffer.write(data).wait();
+        return new_buffer;
     }
 
     fn read(&self) -> BufferReadFuture<T> {
@@ -122,25 +125,18 @@ mod staged_buffer_tests {
     fn staged_buffer_round_trip() {
         let ctx = Context::new();
         let initial = vec![1.0f32, 2.0, 3.0, 4.0];
-
         let mut buffer = ctx.create_coherent_buffer(&initial);
-
         assert_eq!(buffer.read().wait(), initial);
-
         let updated = vec![5.0, 2.3, 17.6, 32.0];
         buffer.write(&updated).wait();
-
         assert_eq!(buffer.read().wait(), updated);
     }
     #[test]
     fn staged_buffer_partial_update() {
         let ctx = Context::new();
         let initial = vec![1u32, 2, 3, 4, 5];
-
         let mut buffer = ctx.create_coherent_buffer(&initial);
-
         buffer.write(&[10, 20]);
-
         let result = buffer.read().wait();
         assert_eq!(result, vec![10, 20, 3, 4, 5]);
     }
@@ -148,7 +144,6 @@ mod staged_buffer_tests {
     fn staged_buffer_multiple_updates() {
         let ctx = Context::new();
         let mut buffer = ctx.create_coherent_buffer(&[0i32; 4]);
-
         for i in 0..10 {
             let data = vec![i, i + 1, i + 2, i + 3];
             buffer.write(&data).wait();
