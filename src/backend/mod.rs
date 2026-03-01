@@ -9,7 +9,8 @@ use vulkano::{
         StandardCommandBufferAllocator, StandardCommandBufferAllocatorCreateInfo,
     },
     device::{
-        Device, DeviceCreateInfo, Queue, QueueCreateInfo, QueueFlags, physical::PhysicalDevice,
+        self, Device, DeviceCreateInfo, Queue, QueueCreateInfo, QueueFlags,
+        physical::PhysicalDevice,
     },
     instance::{Instance, InstanceCreateFlags, InstanceCreateInfo},
     memory::allocator::StandardMemoryAllocator,
@@ -60,16 +61,35 @@ impl Context {
             },
         )
         .expect("Failed to create Vulkan instance.");
-        let physical_device = instance
+        let devices: Vec<_> = instance
             .enumerate_physical_devices()
             .expect("Could not enumerate physical devices.")
-            .next()
-            .expect("No physical devices available.");
+            .collect();
+        if devices.is_empty() {
+            panic!("No physical devices available.");
+        }
+        if let Some(dev) = devices.iter().find(|d| {
+            d.properties().device_type == vulkano::device::physical::PhysicalDeviceType::DiscreteGpu
+        }) {
+            println!("Using discrete GPU: {}", dev.properties().device_name);
+            return dev.clone();
+        }
+
+        if let Some(dev) = devices.iter().find(|d| {
+            d.properties().device_type
+                == vulkano::device::physical::PhysicalDeviceType::IntegratedGpu
+        }) {
+            println!("Using integrated GPU: {}", dev.properties().device_name);
+            return dev.clone();
+        }
+
+        let dev = devices[0].clone();
         println!(
-            "Physical device name: {:?}",
-            physical_device.properties().device_name
+            "Using fallback GPU: {} ({:?})",
+            dev.properties().device_name,
+            dev.properties().device_type
         );
-        physical_device
+        dev
     }
     fn create_queue_family_index(physical_device: Arc<PhysicalDevice>) -> u32 {
         for family in physical_device.queue_family_properties() {

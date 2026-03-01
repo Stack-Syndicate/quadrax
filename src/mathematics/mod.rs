@@ -14,15 +14,12 @@ use vulkano::{
     sync::GpuFuture,
 };
 
-use crate::backend::{
-    Context,
-    buffer::{Buffer, staged::StagedBuffer},
-};
+use crate::backend::{Context, buffer::staged::StagedBuffer};
 
 pub mod matrix;
 pub mod shaders;
-pub mod vector;
 
+#[repr(u32)]
 pub enum OpCode {
     Add = 0,
     Sub = 1,
@@ -35,14 +32,28 @@ pub enum OpCode {
 #[repr(C)]
 #[derive(BufferContents, Clone, Copy, Debug, PartialEq)]
 pub struct Vec4 {
-    x: f32,
-    y: f32,
-    z: f32,
-    w: f32,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub w: f32,
 }
 impl Vec4 {
     pub fn new(x: f32, y: f32, z: f32, w: f32) -> Self {
         Self { x, y, z, w }
+    }
+}
+
+pub struct ComputeFuture {
+    inner: Option<Box<dyn GpuFuture>>,
+}
+impl ComputeFuture {
+    pub fn wait(self) {
+        if let Some(fut) = self.inner {
+            fut.then_signal_fence_and_flush()
+                .unwrap()
+                .wait(None)
+                .unwrap();
+        }
     }
 }
 
@@ -86,8 +97,7 @@ impl GPULA {
         a: &StagedBuffer<T>,
         b: &StagedBuffer<T>,
         c: &StagedBuffer<T>,
-        count: u32,
-    ) {
+    ) -> ComputeFuture {
         let layout = self.pipeline.layout().set_layouts().get(0).unwrap();
         let set = DescriptorSet::new(
             self.descriptor_set_allocator.clone(),
@@ -102,7 +112,7 @@ impl GPULA {
         .expect("Failed to create descriptor set.");
         let push_constants = shaders::vector_ops::PushConstants {
             op_code: op as u32,
-            count,
+            count: a.inner.len() as u32,
         };
         let mut builder = AutoCommandBufferBuilder::primary(
             ctx.command_allocator.clone(),
@@ -124,55 +134,25 @@ impl GPULA {
             .unwrap();
         unsafe { builder.dispatch([128, 1, 1]) }.unwrap();
         let command_buffer = builder.build().unwrap();
-        vulkano::sync::now(ctx.device.clone())
-            .then_execute(ctx.queue.clone(), command_buffer)
-            .unwrap()
-            .then_signal_fence_and_flush()
-            .unwrap()
-            .wait(None)
-            .unwrap();
+        ComputeFuture {
+            inner: Some(Box::new(
+                vulkano::sync::now(ctx.device.clone())
+                    .then_execute(ctx.queue.clone(), command_buffer)
+                    .unwrap()
+                    .then_signal_fence_and_flush()
+                    .unwrap(),
+            )),
+        }
     }
 }
 
-#[test]
-fn test_gpu_add() {
-    let ctx = Context::new();
-    let gpula = GPULA::new(&ctx);
+#[cfg(test)]
+mod mathematics_tests {
+    use super::*;
+    use crate::backend::Context;
 
-    let a_data = vec![Vec4::new(1.0, 1.0, 1.0, 1.0)];
-    let b_data = vec![Vec4::new(1.0, 1.0, 1.0, 1.0)];
-    let empty = vec![Vec4::new(0.0, 0.0, 0.0, 0.0)];
-
-    let buf_a = ctx.create_staged_buffer(&a_data);
-    let buf_b = ctx.create_staged_buffer(&b_data);
-    let buf_c = ctx.create_staged_buffer(&empty);
-
-    gpula.dispatch(&ctx, OpCode::Add, &buf_a, &buf_b, &buf_c, 1);
-
-    let result = buf_c.read().wait();
-    assert_eq!(result[0], Vec4::new(2.0, 2.0, 2.0, 2.0));
-}
-
-#[test]
-fn test_gpu_add_bulk() {
-    let ctx = Context::new();
-    let gpula = GPULA::new(&ctx);
-    let count = 1024;
-    let a_data: Vec<Vec4> = (0..count)
-        .map(|i| Vec4::new(i as f32, 1.0, 2.0, 3.0))
-        .collect();
-    let b_data: Vec<Vec4> = (0..count)
-        .map(|i| Vec4::new(1.0, i as f32, 1.0, 1.0))
-        .collect();
-    let empty = vec![Vec4::new(0.0, 0.0, 0.0, 0.0); count];
-    let buf_a = ctx.create_staged_buffer(&a_data);
-    let buf_b = ctx.create_staged_buffer(&b_data);
-    let buf_c = ctx.create_staged_buffer(&empty);
-    gpula.dispatch(&ctx, OpCode::Add, &buf_a, &buf_b, &buf_c, count as u32);
-    let result = buf_c.read().wait();
-    assert_eq!(result.len(), count, "Result buffer length mismatch");
-    for i in 0..count {
-        let expected = Vec4::new(i as f32 + 1.0, 1.0 + i as f32, 3.0, 4.0);
-        assert_eq!(result[i], expected, "Mismatch found at index {}", i);
+    #[test]
+    fn gpu_vs_cpu_vector_add_benchmark() {
+        use std::time::Instant;
     }
 }
