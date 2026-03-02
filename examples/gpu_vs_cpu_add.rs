@@ -3,18 +3,17 @@ use std::time::Instant;
 
 use quadrax::{
     backend::Context,
-    mathematics::{GPULA, Vec4},
+    mathematics::{LinearAlgebra, Vec4},
 };
 
 fn main() {
     let ctx = Context::new();
-    let la = GPULA::new(&ctx);
+    let maths = LinearAlgebra::new(&ctx);
 
     let n = 10_000_000; // this must be large
     let iters = 50;
 
     let a_data: Vec<Vec4> = (0..n).map(|i| Vec4::new(i as f32, 1.0, 2.0, 3.0)).collect();
-
     let b_data: Vec<Vec4> = (0..n).map(|i| Vec4::new(1.0, i as f32, 3.0, 4.0)).collect();
 
     let mut cpu_out = vec![Vec4::new(0.0, 0.0, 0.0, 0.0); n];
@@ -34,7 +33,7 @@ fn main() {
 
     let gpu_start = Instant::now();
     for _ in 0..iters {
-        let fut = la.dispatch(&ctx, OpCode::Add, &a, &b, &c);
+        let fut = maths.dispatch(&ctx, OpCode::Add, &a, &b, &c);
         fut.wait();
     }
     let gpu_time = gpu_start.elapsed();

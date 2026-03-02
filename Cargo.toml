@@ -6,5 +6,7 @@ description = "Graphics library inspired by Macroquad."
 license-file = "./LICENSE"
 
 [dependencies]
+bytemuck = { version = "1.25.0", features = ["derive"] }
+image = "0.25.9"
 vulkano = "0.35.2"
 vulkano-shaders = "0.35.0"
