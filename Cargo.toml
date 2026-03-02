@@ -2,11 +2,12 @@
 name = "quadrax"
 version = "0.0.1"
 edition = "2024"
-description = "Graphics library inspired by Macroquad."
+description = "Weird graphics library."
 license-file = "./LICENSE"
 
 [dependencies]
 bytemuck = { version = "1.25.0", features = ["derive"] }
 image = "0.25.9"
+petgraph = "0.8.3"
 vulkano = "0.35.2"
 vulkano-shaders = "0.35.0"

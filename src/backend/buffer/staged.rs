@@ -1,5 +1,6 @@
+use bytemuck::{Pod, cast_slice};
 use vulkano::{
-    buffer::{BufferContents, BufferCreateInfo, BufferUsage, Subbuffer},
+    buffer::{BufferCreateInfo, BufferUsage, Subbuffer},
     command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, CopyBufferInfo},
     memory::allocator::{AllocationCreateInfo, MemoryTypeFilter},
     sync::{GpuFuture, now},
@@ -10,13 +11,14 @@ use crate::backend::{
     buffer::{Buffer, BufferReadFuture, BufferWriteFuture},
 };
 
-pub struct StagedBuffer<T: BufferContents + Copy> {
-    ctx: Context,
-    pub inner: Subbuffer<[T]>,
-    pub staging: Subbuffer<[T]>,
+pub struct StagedBuffer {
+    pub ctx: Context,
+    pub inner: Subbuffer<[u8]>,
+    pub staging: Subbuffer<[u8]>,
 }
-impl<T: BufferContents + Copy> Buffer<T> for StagedBuffer<T> {
-    fn from_data(ctx: Context, data: &[T]) -> Self {
+impl StagedBuffer {
+    pub fn from_data<T: Pod>(ctx: Context, data: &[T]) -> Self {
+        let data_bytes = cast_slice(data);
         let staging = vulkano::buffer::Buffer::from_iter(
             ctx.memory_allocator.clone(),
             BufferCreateInfo {
@@ -25,11 +27,10 @@ impl<T: BufferContents + Copy> Buffer<T> for StagedBuffer<T> {
             },
             AllocationCreateInfo {
                 memory_type_filter: MemoryTypeFilter::PREFER_HOST
-                    | MemoryTypeFilter::HOST_RANDOM_ACCESS
-                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+                    | MemoryTypeFilter::HOST_RANDOM_ACCESS,
                 ..Default::default()
             },
-            data.iter().copied(),
+            data_bytes.iter().copied(),
         )
         .expect("Failed to create staged buffer.");
         let buffer = vulkano::buffer::Buffer::new_slice(
@@ -44,19 +45,20 @@ impl<T: BufferContents + Copy> Buffer<T> for StagedBuffer<T> {
                 memory_type_filter: MemoryTypeFilter::PREFER_DEVICE,
                 ..Default::default()
             },
-            data.len() as u64,
+            data_bytes.len() as u64,
         )
         .expect("Failed to create device-local buffer.");
         let mut new_buffer = Self {
             ctx,
             inner: buffer,
-            staging,
+            staging: staging.into_bytes(),
         };
-        new_buffer.write(data).wait();
+        new_buffer.write_bytes(data_bytes).wait();
         return new_buffer;
     }
-
-    fn read(&self) -> BufferReadFuture<T> {
+}
+impl Buffer for StagedBuffer {
+    fn read_bytes(&self) -> BufferReadFuture<u8> {
         let mut cmd = AutoCommandBufferBuilder::primary(
             self.ctx.command_allocator.clone(),
             self.ctx.queue.queue_family_index(),
@@ -76,10 +78,8 @@ impl<T: BufferContents + Copy> Buffer<T> for StagedBuffer<T> {
             .unwrap();
         let staging = self.staging.clone();
         let data = Box::new(move || {
-            staging
-                .read()
-                .expect("Failed to read staging buffer.")
-                .to_vec()
+            let data_bytes = staging.read().expect("Failed to read staging buffer.");
+            cast_slice(&data_bytes).to_vec()
         });
         BufferReadFuture {
             inner: Some(future.boxed()),
@@ -87,19 +87,18 @@ impl<T: BufferContents + Copy> Buffer<T> for StagedBuffer<T> {
         }
     }
 
-    fn write(&mut self, data: &[T]) -> BufferWriteFuture {
+    fn write_bytes(&mut self, data: &[u8]) -> BufferWriteFuture {
+        let data_bytes = cast_slice(data);
         {
             let mut mapping = self.staging.write().unwrap();
-            mapping[..data.len()].copy_from_slice(data);
+            mapping[..data_bytes.len()].copy_from_slice(data_bytes);
         }
-
         let mut cmd = AutoCommandBufferBuilder::primary(
             self.ctx.command_allocator.clone(),
             self.ctx.queue.queue_family_index(),
             CommandBufferUsage::OneTimeSubmit,
         )
         .unwrap();
-
         cmd.copy_buffer(CopyBufferInfo::buffers(
             self.staging.clone(),
             self.inner.clone(),
@@ -115,21 +114,24 @@ impl<T: BufferContents + Copy> Buffer<T> for StagedBuffer<T> {
             inner: Some(future.boxed()),
         }
     }
+    fn len(&self) -> usize {
+        self.inner.len() as usize
+    }
 }
 
 #[cfg(test)]
 mod staged_buffer_tests {
-    use crate::backend::Buffer;
     use crate::backend::Context;
+    use crate::backend::buffer::BufferTyped;
     #[test]
     fn staged_buffer_round_trip() {
         let ctx = Context::new();
         let initial = vec![1.0f32, 2.0, 3.0, 4.0];
         let mut buffer = ctx.create_coherent_buffer(&initial);
-        assert_eq!(buffer.read().wait(), initial);
+        assert_eq!(buffer.read::<f32>().wait(), initial);
         let updated = vec![5.0, 2.3, 17.6, 32.0];
         buffer.write(&updated).wait();
-        assert_eq!(buffer.read().wait(), updated);
+        assert_eq!(buffer.read::<f32>().wait(), updated);
     }
     #[test]
     fn staged_buffer_partial_update() {
@@ -137,7 +139,7 @@ mod staged_buffer_tests {
         let initial = vec![1u32, 2, 3, 4, 5];
         let mut buffer = ctx.create_coherent_buffer(&initial);
         buffer.write(&[10, 20]);
-        let result = buffer.read().wait();
+        let result = buffer.read::<u32>().wait();
         assert_eq!(result, vec![10, 20, 3, 4, 5]);
     }
     #[test]
@@ -147,7 +149,7 @@ mod staged_buffer_tests {
         for i in 0..10 {
             let data = vec![i, i + 1, i + 2, i + 3];
             buffer.write(&data).wait();
-            assert_eq!(buffer.read().wait(), data);
+            assert_eq!(buffer.read::<i32>().wait(), data);
         }
     }
 }

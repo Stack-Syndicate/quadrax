@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
+use bytemuck::{Pod, Zeroable};
 use vulkano::{
-    buffer::BufferContents,
     command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage},
     descriptor_set::{
         DescriptorSet, WriteDescriptorSet, allocator::StandardDescriptorSetAllocator,
@@ -16,7 +16,6 @@ use vulkano::{
 
 use crate::backend::{Context, buffer::staged::StagedBuffer};
 
-pub mod matrix;
 pub mod shaders;
 
 #[repr(u32)]
@@ -30,7 +29,7 @@ pub enum OpCode {
 }
 
 #[repr(C)]
-#[derive(BufferContents, Clone, Copy, Debug, PartialEq)]
+#[derive(Pod, Zeroable, Clone, Copy, Debug, PartialEq)]
 pub struct Vec4 {
     pub x: f32,
     pub y: f32,
@@ -57,13 +56,13 @@ impl ComputeFuture {
     }
 }
 
-pub struct GPULA {
+pub struct LinearAlgebra {
     pub pipeline: Arc<ComputePipeline>,
     pub descriptor_set_allocator: Arc<StandardDescriptorSetAllocator>,
 }
-impl GPULA {
+impl LinearAlgebra {
     pub fn new(ctx: &Context) -> Self {
-        let shader = shaders::vector_ops::load(ctx.device.clone())
+        let shader: _ = shaders::vector_ops::load(ctx.device.clone())
             .expect("Could not load vector ops shader.");
         let entry_point = shader.entry_point("main").unwrap();
         let stage = PipelineShaderStageCreateInfo::new(entry_point);
@@ -94,9 +93,9 @@ impl GPULA {
         &self,
         ctx: &Context,
         op: OpCode,
-        a: &StagedBuffer<T>,
-        b: &StagedBuffer<T>,
-        c: &StagedBuffer<T>,
+        a: &StagedBuffer,
+        b: &StagedBuffer,
+        c: &StagedBuffer,
     ) -> ComputeFuture {
         let layout = self.pipeline.layout().set_layouts().get(0).unwrap();
         let set = DescriptorSet::new(
@@ -143,16 +142,5 @@ impl GPULA {
                     .unwrap(),
             )),
         }
-    }
-}
-
-#[cfg(test)]
-mod mathematics_tests {
-    use super::*;
-    use crate::backend::Context;
-
-    #[test]
-    fn gpu_vs_cpu_vector_add_benchmark() {
-        use std::time::Instant;
     }
 }

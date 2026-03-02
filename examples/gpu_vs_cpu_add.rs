@@ -33,7 +33,7 @@ fn main() {
 
     let gpu_start = Instant::now();
     for _ in 0..iters {
-        let fut = maths.dispatch(&ctx, OpCode::Add, &a, &b, &c);
+        let fut = maths.dispatch::<Vec4>(&ctx, OpCode::Add, &a, &b, &c);
         fut.wait();
     }
     let gpu_time = gpu_start.elapsed();

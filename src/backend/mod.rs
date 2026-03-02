@@ -1,7 +1,9 @@
 pub mod buffer;
+pub mod gpu_graph;
 
 use std::sync::Arc;
 
+use bytemuck::Pod;
 use vulkano::{
     VulkanLibrary,
     buffer::BufferContents,
@@ -9,8 +11,7 @@ use vulkano::{
         StandardCommandBufferAllocator, StandardCommandBufferAllocatorCreateInfo,
     },
     device::{
-        self, Device, DeviceCreateInfo, Queue, QueueCreateInfo, QueueFlags,
-        physical::PhysicalDevice,
+        Device, DeviceCreateInfo, Queue, QueueCreateInfo, QueueFlags, physical::PhysicalDevice,
     },
     instance::{Instance, InstanceCreateFlags, InstanceCreateInfo},
     memory::allocator::StandardMemoryAllocator,
@@ -42,13 +43,10 @@ impl Context {
             command_allocator,
         }
     }
-    pub fn create_coherent_buffer<T: BufferContents + Copy>(
-        &self,
-        data: &[T],
-    ) -> CoherentBuffer<T> {
+    pub fn create_coherent_buffer<T: BufferContents + Pod>(&self, data: &[T]) -> CoherentBuffer {
         CoherentBuffer::from_data(self.clone(), data)
     }
-    pub fn create_staged_buffer<T: BufferContents + Copy>(&self, data: &[T]) -> StagedBuffer<T> {
+    pub fn create_staged_buffer<T: BufferContents + Pod>(&self, data: &[T]) -> StagedBuffer {
         StagedBuffer::from_data(self.clone(), data)
     }
     fn create_physical_device() -> Arc<PhysicalDevice> {
