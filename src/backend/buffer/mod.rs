@@ -7,26 +7,30 @@ use std::{
 };
 
 use bytemuck::{Pod, checked::cast_slice};
-use vulkano::sync::GpuFuture;
+use vulkano::{buffer::Subbuffer, sync::GpuFuture};
 
 pub trait Buffer {
     fn read_bytes(&self) -> BufferReadFuture<u8>;
     fn write_bytes(&mut self, bytes: &[u8]) -> BufferWriteFuture;
+    fn ptr_bytes(&self) -> Subbuffer<[u8]>;
     fn len(&self) -> usize;
 }
-pub trait BufferTyped: Buffer {
-    fn read<T: Pod>(&self) -> BufferReadFuture<T> {
+pub trait BufferTyped: Buffer + Clone {
+    fn read<T: Pod + Send + Sync>(&self) -> BufferReadFuture<T> {
         assert!(self.len() % std::mem::size_of::<T>() == 0);
         self.read_bytes().cast::<T>()
     }
 
-    fn write<T: Pod>(&mut self, data: &[T]) -> BufferWriteFuture {
+    fn write<T: Pod + Send + Sync>(&mut self, data: &[T]) -> BufferWriteFuture {
         let bytes = cast_slice(data);
         assert!(bytes.len() <= self.len());
         self.write_bytes(bytes)
     }
+    fn ptr<T: Pod + Send + Sync>(&self) -> Subbuffer<[T]> {
+        self.ptr_bytes().cast_aligned()
+    }
 }
-impl<B: Buffer + ?Sized> BufferTyped for B {}
+impl<B: Buffer + ?Sized + Clone> BufferTyped for B {}
 
 pub struct BufferWriteFuture {
     inner: Option<Box<dyn GpuFuture>>,

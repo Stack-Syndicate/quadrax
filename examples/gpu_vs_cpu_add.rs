@@ -1,14 +1,13 @@
-use quadrax::mathematics::OpCode;
+use quadrax::compute::mathematics::OpCode;
+use quadrax::compute::{ComputeContext, Vec4, mathematics::LinearAlgebra};
+use std::sync::Arc;
 use std::time::Instant;
 
-use quadrax::{
-    backend::Context,
-    mathematics::{LinearAlgebra, Vec4},
-};
+use quadrax::backend::BackendContext;
 
 fn main() {
-    let ctx = Context::new();
-    let maths = LinearAlgebra::new(&ctx);
+    let ctx = BackendContext::new();
+    let mut compute = ComputeContext::new(ctx.clone());
 
     let n = 10_000_000; // this must be large
     let iters = 50;
@@ -21,6 +20,8 @@ fn main() {
     let a = ctx.create_staged_buffer(&a_data);
     let b = ctx.create_staged_buffer(&b_data);
     let c = ctx.create_staged_buffer(&a_data.clone());
+    let maths = LinearAlgebra::new(&ctx, a, b, c, OpCode::Add);
+    compute.add_pass(Arc::new(maths));
     let cpu_start = Instant::now();
     for _ in 0..iters {
         for i in 0..n {
@@ -33,8 +34,7 @@ fn main() {
 
     let gpu_start = Instant::now();
     for _ in 0..iters {
-        let fut = maths.dispatch::<Vec4>(&ctx, OpCode::Add, &a, &b, &c);
-        fut.wait();
+        compute.dispatch();
     }
     let gpu_time = gpu_start.elapsed();
 

@@ -1,9 +1,6 @@
 pub mod buffer;
-pub mod gpu_graph;
-
-use std::sync::Arc;
-
 use bytemuck::Pod;
+use std::sync::Arc;
 use vulkano::{
     VulkanLibrary,
     buffer::BufferContents,
@@ -20,17 +17,18 @@ use vulkano::{
 use crate::backend::buffer::{coherent::CoherentBuffer, staged::StagedBuffer};
 
 #[derive(Clone, Debug)]
-pub struct Context {
+pub struct BackendContext {
     pub device: Arc<Device>,
     pub queue: Arc<Queue>,
     pub memory_allocator: Arc<StandardMemoryAllocator>,
     pub command_allocator: Arc<StandardCommandBufferAllocator>,
 }
-impl Context {
+impl BackendContext {
     pub fn new() -> Self {
-        let physical_device = Context::create_physical_device();
-        let queue_family_index = Context::create_queue_family_index(physical_device.clone());
-        let (device, queue) = Context::create_device_queue(physical_device, queue_family_index);
+        let physical_device = BackendContext::create_physical_device();
+        let queue_family_index = BackendContext::create_queue_family_index(physical_device.clone());
+        let (device, queue) =
+            BackendContext::create_device_queue(physical_device, queue_family_index);
         let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
         let command_allocator = Arc::new(StandardCommandBufferAllocator::new(
             device.clone(),

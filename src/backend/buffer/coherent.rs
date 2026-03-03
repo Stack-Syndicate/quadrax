@@ -5,15 +5,16 @@ use vulkano::{
 };
 
 use crate::backend::{
-    Context,
+    BackendContext,
     buffer::{Buffer, BufferReadFuture, BufferWriteFuture},
 };
 
+#[derive(Clone, Debug)]
 pub struct CoherentBuffer {
-    pub inner: Subbuffer<[u8]>,
+    ptr: Subbuffer<[u8]>,
 }
 impl CoherentBuffer {
-    pub fn from_data<T: Pod>(ctx: Context, data: &[T]) -> Self {
+    pub fn from_data<T: Pod + Send + Sync>(ctx: BackendContext, data: &[T]) -> Self {
         let data_bytes = cast_slice(data);
         let buffer = vulkano::buffer::Buffer::from_iter(
             ctx.memory_allocator.clone(),
@@ -29,13 +30,13 @@ impl CoherentBuffer {
             data_bytes.iter().copied(),
         )
         .expect("Failed to create variable buffer.");
-        Self { inner: buffer }
+        Self { ptr: buffer }
     }
 }
 impl Buffer for CoherentBuffer {
     fn read_bytes(&self) -> BufferReadFuture<u8> {
         let mapping = self
-            .inner
+            .ptr
             .read()
             .expect("Dynamic buffer read failed.")
             .to_vec();
@@ -48,22 +49,24 @@ impl Buffer for CoherentBuffer {
     }
 
     fn write_bytes(&mut self, data: &[u8]) -> BufferWriteFuture {
-        let mut mapping = self.inner.write().unwrap();
+        let mut mapping = self.ptr.write().unwrap();
         mapping[..data.len()].copy_from_slice(data);
         BufferWriteFuture { inner: None }
     }
-
+    fn ptr_bytes(&self) -> Subbuffer<[u8]> {
+        self.ptr.clone()
+    }
     fn len(&self) -> usize {
-        self.inner.len() as usize
+        self.ptr.len() as usize
     }
 }
 
 #[cfg(test)]
 mod variable_buffer_tests {
-    use crate::backend::{Context, buffer::BufferTyped};
+    use crate::backend::{BackendContext, buffer::BufferTyped};
     #[test]
     fn variable_buffer_round_trip() {
-        let ctx = Context::new();
+        let ctx = BackendContext::new();
         let initial = vec![1.0f32, 2.0, 3.0, 4.0];
 
         let mut buffer = ctx.create_coherent_buffer(&initial);
@@ -77,7 +80,7 @@ mod variable_buffer_tests {
     }
     #[test]
     fn variable_buffer_partial_update() {
-        let ctx = Context::new();
+        let ctx = BackendContext::new();
         let initial = vec![1u32, 2, 3, 4, 5];
 
         let mut buffer = ctx.create_coherent_buffer(&initial);
@@ -89,7 +92,7 @@ mod variable_buffer_tests {
     }
     #[test]
     fn variable_buffer_multiple_updates() {
-        let ctx = Context::new();
+        let ctx = BackendContext::new();
         let mut buffer = ctx.create_coherent_buffer(&[0i32; 4]);
 
         for i in 0..10 {

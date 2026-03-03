@@ -7,17 +7,18 @@ use vulkano::{
 };
 
 use crate::backend::{
-    Context,
+    BackendContext,
     buffer::{Buffer, BufferReadFuture, BufferWriteFuture},
 };
 
+#[derive(Clone, Debug)]
 pub struct StagedBuffer {
-    pub ctx: Context,
-    pub inner: Subbuffer<[u8]>,
+    pub ctx: BackendContext,
+    pub ptr: Subbuffer<[u8]>,
     pub staging: Subbuffer<[u8]>,
 }
 impl StagedBuffer {
-    pub fn from_data<T: Pod>(ctx: Context, data: &[T]) -> Self {
+    pub fn from_data<T: Pod + Send + Sync>(ctx: BackendContext, data: &[T]) -> Self {
         let data_bytes = cast_slice(data);
         let staging = vulkano::buffer::Buffer::from_iter(
             ctx.memory_allocator.clone(),
@@ -50,7 +51,7 @@ impl StagedBuffer {
         .expect("Failed to create device-local buffer.");
         let mut new_buffer = Self {
             ctx,
-            inner: buffer,
+            ptr: buffer,
             staging: staging.into_bytes(),
         };
         new_buffer.write_bytes(data_bytes).wait();
@@ -66,7 +67,7 @@ impl Buffer for StagedBuffer {
         )
         .unwrap();
         cmd.copy_buffer(CopyBufferInfo::buffers(
-            self.inner.clone(),
+            self.ptr.clone(),
             self.staging.clone(),
         ))
         .unwrap();
@@ -101,7 +102,7 @@ impl Buffer for StagedBuffer {
         .unwrap();
         cmd.copy_buffer(CopyBufferInfo::buffers(
             self.staging.clone(),
-            self.inner.clone(),
+            self.ptr.clone(),
         ))
         .unwrap();
         let cmd_buf = cmd.build().unwrap();
@@ -115,17 +116,20 @@ impl Buffer for StagedBuffer {
         }
     }
     fn len(&self) -> usize {
-        self.inner.len() as usize
+        self.ptr.len() as usize
+    }
+    fn ptr_bytes(&self) -> Subbuffer<[u8]> {
+        self.ptr.clone()
     }
 }
 
 #[cfg(test)]
 mod staged_buffer_tests {
-    use crate::backend::Context;
+    use crate::backend::BackendContext;
     use crate::backend::buffer::BufferTyped;
     #[test]
     fn staged_buffer_round_trip() {
-        let ctx = Context::new();
+        let ctx = BackendContext::new();
         let initial = vec![1.0f32, 2.0, 3.0, 4.0];
         let mut buffer = ctx.create_coherent_buffer(&initial);
         assert_eq!(buffer.read::<f32>().wait(), initial);
@@ -135,7 +139,7 @@ mod staged_buffer_tests {
     }
     #[test]
     fn staged_buffer_partial_update() {
-        let ctx = Context::new();
+        let ctx = BackendContext::new();
         let initial = vec![1u32, 2, 3, 4, 5];
         let mut buffer = ctx.create_coherent_buffer(&initial);
         buffer.write(&[10, 20]);
@@ -144,7 +148,7 @@ mod staged_buffer_tests {
     }
     #[test]
     fn staged_buffer_multiple_updates() {
-        let ctx = Context::new();
+        let ctx = BackendContext::new();
         let mut buffer = ctx.create_coherent_buffer(&[0i32; 4]);
         for i in 0..10 {
             let data = vec![i, i + 1, i + 2, i + 3];

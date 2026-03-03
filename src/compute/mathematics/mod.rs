@@ -1,23 +1,26 @@
 use std::sync::Arc;
+use vulkano::pipeline::Pipeline;
+use vulkano::sync::GpuFuture;
 
-use bytemuck::{Pod, Zeroable};
 use vulkano::{
     command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage},
     descriptor_set::{
         DescriptorSet, WriteDescriptorSet, allocator::StandardDescriptorSetAllocator,
     },
     pipeline::{
-        ComputePipeline, Pipeline, PipelineBindPoint, PipelineLayout,
-        PipelineShaderStageCreateInfo, compute::ComputePipelineCreateInfo,
-        layout::PipelineDescriptorSetLayoutCreateInfo,
+        ComputePipeline, PipelineBindPoint, PipelineLayout, PipelineShaderStageCreateInfo,
+        compute::ComputePipelineCreateInfo, layout::PipelineDescriptorSetLayoutCreateInfo,
     },
-    sync::GpuFuture,
 };
 
-use crate::backend::{Context, buffer::staged::StagedBuffer};
-
-pub mod shaders;
-
+use crate::backend::buffer::Buffer;
+use crate::backend::buffer::staged::StagedBuffer;
+use crate::compute::{ComputeParameter, ComputePass};
+use crate::{
+    backend::BackendContext,
+    compute::{ComputeFuture, vector_ops},
+};
+#[derive(Clone, Debug)]
 #[repr(u32)]
 pub enum OpCode {
     Add = 0,
@@ -25,45 +28,33 @@ pub enum OpCode {
     Dot = 2,
     Mul = 3,
     Cross = 4,
-    Distance = 5,
+    Dist = 5,
 }
-
-#[repr(C)]
-#[derive(Pod, Zeroable, Clone, Copy, Debug, PartialEq)]
-pub struct Vec4 {
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
-    pub w: f32,
-}
-impl Vec4 {
-    pub fn new(x: f32, y: f32, z: f32, w: f32) -> Self {
-        Self { x, y, z, w }
-    }
-}
-
-pub struct ComputeFuture {
-    inner: Option<Box<dyn GpuFuture>>,
-}
-impl ComputeFuture {
-    pub fn wait(self) {
-        if let Some(fut) = self.inner {
-            fut.then_signal_fence_and_flush()
-                .unwrap()
-                .wait(None)
-                .unwrap();
-        }
+impl ComputeParameter for OpCode {
+    fn to_u32(&self) -> u32 {
+        self.clone() as u32
     }
 }
 
 pub struct LinearAlgebra {
     pub pipeline: Arc<ComputePipeline>,
     pub descriptor_set_allocator: Arc<StandardDescriptorSetAllocator>,
+    pub in1: StagedBuffer,
+    pub in2: StagedBuffer,
+    pub out: StagedBuffer,
+    pub ctx: BackendContext,
+    pub op: OpCode,
 }
 impl LinearAlgebra {
-    pub fn new(ctx: &Context) -> Self {
-        let shader: _ = shaders::vector_ops::load(ctx.device.clone())
-            .expect("Could not load vector ops shader.");
+    pub fn new(
+        ctx: &BackendContext,
+        in1: StagedBuffer,
+        in2: StagedBuffer,
+        out: StagedBuffer,
+        op: OpCode,
+    ) -> Self {
+        let shader =
+            vector_ops::load(ctx.device.clone()).expect("Could not load vector ops shader.");
         let entry_point = shader.entry_point("main").unwrap();
         let stage = PipelineShaderStageCreateInfo::new(entry_point);
         let pipeline = ComputePipeline::new(
@@ -82,36 +73,42 @@ impl LinearAlgebra {
         )
         .expect("Failed to create compute pipeline");
         Self {
+            in1,
+            in2,
+            out,
             pipeline,
             descriptor_set_allocator: Arc::new(StandardDescriptorSetAllocator::new(
                 ctx.device.clone(),
                 Default::default(),
             )),
+            ctx: ctx.clone(),
+            op: op,
         }
     }
-    pub fn dispatch<T: vulkano::buffer::BufferContents + Copy>(
-        &self,
-        ctx: &Context,
-        op: OpCode,
-        a: &StagedBuffer,
-        b: &StagedBuffer,
-        c: &StagedBuffer,
-    ) -> ComputeFuture {
+}
+impl ComputePass for LinearAlgebra {
+    fn dispatch(&self) -> ComputeFuture {
+        let ctx = self.backend();
+        let buffers = self.buffers();
+        let a = buffers[0].clone();
+        let b = buffers[1].clone();
+        let c = buffers[2].clone();
+        let op = self.parameters()[0].clone();
         let layout = self.pipeline.layout().set_layouts().get(0).unwrap();
         let set = DescriptorSet::new(
             self.descriptor_set_allocator.clone(),
             layout.clone(),
             [
-                WriteDescriptorSet::buffer(0, a.inner.clone()),
-                WriteDescriptorSet::buffer(1, b.inner.clone()),
-                WriteDescriptorSet::buffer(2, c.inner.clone()),
+                WriteDescriptorSet::buffer(0, a.ptr_bytes()),
+                WriteDescriptorSet::buffer(1, b.ptr_bytes()),
+                WriteDescriptorSet::buffer(2, c.ptr_bytes()),
             ],
             [],
         )
         .expect("Failed to create descriptor set.");
-        let push_constants = shaders::vector_ops::PushConstants {
-            op_code: op as u32,
-            count: a.inner.len() as u32,
+        let push_constants = vector_ops::PushConstants {
+            op_code: op.to_u32(),
+            count: a.ptr_bytes().len() as u32,
         };
         let mut builder = AutoCommandBufferBuilder::primary(
             ctx.command_allocator.clone(),
@@ -142,5 +139,18 @@ impl LinearAlgebra {
                     .unwrap(),
             )),
         }
+    }
+    fn buffers(&self) -> Vec<Arc<dyn Buffer>> {
+        vec![
+            Arc::new(self.in1.clone()),
+            Arc::new(self.in2.clone()),
+            Arc::new(self.out.clone()),
+        ]
+    }
+    fn backend(&self) -> BackendContext {
+        self.ctx.clone()
+    }
+    fn parameters(&self) -> Vec<Arc<dyn ComputeParameter>> {
+        vec![Arc::new(self.op.clone())]
     }
 }

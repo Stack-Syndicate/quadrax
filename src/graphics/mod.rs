@@ -1,3 +1,4 @@
+use crate::backend::BackendContext;
 use image::{ImageBuffer, Rgba};
 use std::sync::Arc;
 use vulkano::{
@@ -23,13 +24,18 @@ use vulkano::{
     sync::{self, GpuFuture},
 };
 
-use crate::{
-    backend::Context,
-    graphics::shaders::{screen_frag, screen_vert},
-};
-
-pub mod shaders;
-
+pub mod screen_frag {
+    vulkano_shaders::shader! {
+        ty: "fragment",
+        path: "shaders/screen.frag",
+    }
+}
+pub mod screen_vert {
+    vulkano_shaders::shader! {
+        ty: "vertex",
+        path: "shaders/screen.vert"
+    }
+}
 #[derive(BufferContents, Vertex, Debug)]
 #[repr(C)]
 pub struct ScreenVertex {
@@ -41,12 +47,12 @@ pub struct Screen {
     pub pipeline: Arc<GraphicsPipeline>,
     pub vertex_buffer: Subbuffer<[ScreenVertex]>,
     pub render_pass: Arc<RenderPass>,
-    pub ctx: Context,
+    pub ctx: BackendContext,
     pub size: (f32, f32),
 }
 
 impl Screen {
-    pub fn new(ctx: Context, size: (f32, f32)) -> Self {
+    pub fn new(ctx: BackendContext, size: (f32, f32)) -> Self {
         let vs = screen_vert::load(ctx.device.clone()).expect("failed to create shader module");
         let fs = screen_frag::load(ctx.device.clone()).expect("failed to create shader module");
 
