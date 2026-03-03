@@ -17,7 +17,7 @@ use vulkano::{
     memory::allocator::StandardMemoryAllocator,
 };
 
-use crate::backend::buffer::{Buffer, coherent::CoherentBuffer, staged::StagedBuffer};
+use crate::backend::buffer::{coherent::CoherentBuffer, staged::StagedBuffer};
 
 #[derive(Clone, Debug)]
 pub struct Context {

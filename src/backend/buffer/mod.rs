@@ -3,7 +3,6 @@ pub mod staged;
 
 use std::{
     collections::HashMap,
-    hash::Hash,
     sync::{Arc, Mutex},
 };
 
@@ -67,7 +66,7 @@ impl<T> BufferReadFuture<T> {
 
 #[derive(Clone)]
 pub struct BufferRegistry {
-    inner: Arc<Mutex<HashMap<u32, Box<dyn Buffer>>>>,
+    inner: Arc<Mutex<HashMap<u32, Arc<dyn Buffer>>>>,
 }
 impl BufferRegistry {
     pub fn new() -> Self {
@@ -75,8 +74,11 @@ impl BufferRegistry {
             inner: Arc::new(Mutex::new(HashMap::new())),
         }
     }
-    pub fn insert(&mut self, key: u32, value: Box<dyn Buffer>) {
+    pub fn insert(&mut self, key: u32, value: Arc<dyn Buffer>) {
         let mut inner_lock = self.inner.lock().unwrap();
         inner_lock.insert(key, value);
+    }
+    pub fn get(&self) -> Arc<dyn Buffer> {
+        todo!()
     }
 }
