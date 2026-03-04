@@ -1,7 +1,4 @@
-use core::slice;
-use std::sync::Arc;
-
-use bytemuck::{Pod, cast_vec, checked::cast_slice};
+use bytemuck::{Pod, cast_vec};
 use vulkano::command_buffer::PrimaryCommandBufferAbstract;
 use vulkano::sync::GpuFuture;
 use vulkano::{

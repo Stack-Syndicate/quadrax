@@ -2,7 +2,7 @@ use bytemuck::Pod;
 use image::{ImageBuffer, Rgba};
 use std::sync::Arc;
 use vulkano::command_buffer::{
-    self, ClearColorImageInfo, CommandBufferUsage, CopyBufferToImageInfo, CopyImageToBufferInfo,
+    ClearColorImageInfo, CommandBufferUsage, CopyBufferToImageInfo, CopyImageToBufferInfo,
 };
 use vulkano::format::ClearColorValue;
 use vulkano::sync::{self, now};
@@ -51,7 +51,6 @@ pub struct Image {
     ctx: BackendContext,
     inner: Arc<VulkanoImage>,
     extent: [u32; 3],
-    texel_size: TexelSize,
     staging: Buffer,
 }
 impl Image {
@@ -97,7 +96,6 @@ impl Image {
         );
         Self {
             ctx,
-            texel_size,
             inner: image,
             extent,
             staging,
@@ -151,12 +149,6 @@ impl Image {
     }
 
     pub fn read<T: Pod + Send + Sync>(&self) -> Vec<T> {
-        let bytes_per_pixel = std::mem::size_of::<T>();
-        let width = self.inner.extent()[0];
-        let height = self.inner.extent()[1];
-        let depth = self.inner.extent()[2];
-        let size = (width * height * depth) as usize * bytes_per_pixel;
-
         let mut cmd_buf = AutoCommandBufferBuilder::primary(
             self.ctx.command_allocator.clone(),
             self.ctx.queue.queue_family_index(),
