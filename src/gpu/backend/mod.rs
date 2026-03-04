@@ -1,12 +1,11 @@
-pub mod buffer;
 use bytemuck::Pod;
 use std::sync::Arc;
 use vulkano::{
     VulkanLibrary,
-    buffer::BufferContents,
     command_buffer::allocator::{
         StandardCommandBufferAllocator, StandardCommandBufferAllocatorCreateInfo,
     },
+    descriptor_set::allocator::StandardDescriptorSetAllocator,
     device::{
         Device, DeviceCreateInfo, Queue, QueueCreateInfo, QueueFlags, physical::PhysicalDevice,
     },
@@ -14,7 +13,7 @@ use vulkano::{
     memory::allocator::StandardMemoryAllocator,
 };
 
-use crate::backend::buffer::{coherent::CoherentBuffer, staged::StagedBuffer};
+use crate::gpu::memory::buffer::{Buffer, Location};
 
 #[derive(Clone, Debug)]
 pub struct BackendContext {
@@ -22,6 +21,7 @@ pub struct BackendContext {
     pub queue: Arc<Queue>,
     pub memory_allocator: Arc<StandardMemoryAllocator>,
     pub command_allocator: Arc<StandardCommandBufferAllocator>,
+    pub descriptor_allocator: Arc<StandardDescriptorSetAllocator>,
 }
 impl BackendContext {
     pub fn new() -> Self {
@@ -35,17 +35,18 @@ impl BackendContext {
             StandardCommandBufferAllocatorCreateInfo::default(),
         ));
         Self {
-            device,
+            device: device.clone(),
             queue,
             memory_allocator,
             command_allocator,
+            descriptor_allocator: Arc::new(StandardDescriptorSetAllocator::new(
+                device.clone(),
+                Default::default(),
+            )),
         }
     }
-    pub fn create_coherent_buffer<T: BufferContents + Pod>(&self, data: &[T]) -> CoherentBuffer {
-        CoherentBuffer::from_data(self.clone(), data)
-    }
-    pub fn create_staged_buffer<T: BufferContents + Pod>(&self, data: &[T]) -> StagedBuffer {
-        StagedBuffer::from_data(self.clone(), data)
+    pub fn create_buffer<T: Pod + Send + Sync>(&self, data: Vec<T>, location: Location) -> Buffer {
+        Buffer::new(self.clone(), data, location)
     }
     fn create_physical_device() -> Arc<PhysicalDevice> {
         let library = VulkanLibrary::new().expect("No local Vulkan library found.");

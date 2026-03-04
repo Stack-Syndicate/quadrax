@@ -1,4 +1,3 @@
 #![feature(adt_const_params, const_trait_impl)]
-pub mod backend;
-pub mod compute;
-pub mod graphics;
+#![feature(fn_traits)]
+pub mod gpu;
