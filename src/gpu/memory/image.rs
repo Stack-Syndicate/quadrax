@@ -1,7 +1,11 @@
 use bytemuck::Pod;
+use image::{ImageBuffer, Rgba};
 use std::sync::Arc;
-use vulkano::command_buffer::{CommandBufferUsage, CopyBufferToImageInfo, CopyImageToBufferInfo};
-use vulkano::sync::now;
+use vulkano::command_buffer::{
+    self, ClearColorImageInfo, CommandBufferUsage, CopyBufferToImageInfo, CopyImageToBufferInfo,
+};
+use vulkano::format::ClearColorValue;
+use vulkano::sync::{self, now};
 use vulkano::{
     command_buffer::AutoCommandBufferBuilder,
     format::Format,
@@ -10,24 +14,25 @@ use vulkano::{
     sync::GpuFuture,
 };
 
+use crate::gpu::memory::buffer::BufferFuture;
 use crate::gpu::{
     backend::BackendContext,
     memory::buffer::{Buffer, Location},
 };
 
 type VulkanoImage = vulkano::image::Image;
-type VulkanoBuffer = vulkano::buffer::Buffer;
 pub enum ImageIntent {
     Texture,
     RenderTarget,
     Storage,
     Readback,
 }
+#[derive(Clone, Debug)]
 pub enum TexelSize {
-    R8,
-    RG8,
-    RGB8,
-    RGBA8,
+    R8 = 1,
+    RG8 = 2,
+    RGB8 = 3,
+    RGBA8 = 4,
 }
 impl TexelSize {
     pub fn format(&self) -> Format {
@@ -40,12 +45,17 @@ impl TexelSize {
     }
 }
 
+pub type ImageFuture = BufferFuture;
+
 pub struct Image {
     ctx: BackendContext,
     inner: Arc<VulkanoImage>,
+    extent: [u32; 3],
+    texel_size: TexelSize,
+    staging: Buffer,
 }
 impl Image {
-    pub fn new<T: Pod + Send + Sync>(
+    pub fn new(
         ctx: BackendContext,
         texel_size: TexelSize,
         intent: ImageIntent,
@@ -80,7 +90,18 @@ impl Image {
             },
         )
         .unwrap();
-        Self { ctx, inner: image }
+        let staging = Buffer::new(
+            ctx.clone(),
+            vec![0u8; extent.iter().product::<u32>() as usize * texel_size.format() as usize],
+            Location::Host,
+        );
+        Self {
+            ctx,
+            texel_size,
+            inner: image,
+            extent,
+            staging,
+        }
     }
     fn usage_and_memory(intent: ImageIntent) -> (ImageUsage, MemoryTypeFilter) {
         match intent {
@@ -102,9 +123,8 @@ impl Image {
             ),
         }
     }
-    pub fn write<T: Pod + Send + Sync>(&self, data: &[T]) -> Arc<dyn GpuFuture> {
-        let staging = Buffer::new(self.ctx.clone(), data.to_vec(), Location::Host);
-
+    pub fn write<T: Pod + Send + Sync>(&mut self, data: Vec<T>) -> ImageFuture {
+        self.staging.write(data);
         let mut cmd_buf = AutoCommandBufferBuilder::primary(
             self.ctx.command_allocator.clone(),
             self.ctx.queue.queue_family_index(),
@@ -114,19 +134,20 @@ impl Image {
 
         cmd_buf
             .copy_buffer_to_image(CopyBufferToImageInfo::buffer_image(
-                staging.inner::<T>(),
+                self.staging.inner::<T>(),
                 self.inner.clone(),
             ))
             .unwrap();
 
         let cb = cmd_buf.build().unwrap();
-
-        Arc::new(
-            now(self.ctx.device.clone())
-                .then_execute(self.ctx.queue.clone(), cb)
-                .unwrap()
-                .boxed(),
-        )
+        ImageFuture {
+            inner: Some(
+                now(self.ctx.device.clone())
+                    .then_execute(self.ctx.queue.clone(), cb)
+                    .unwrap()
+                    .boxed(),
+            ),
+        }
     }
 
     pub fn read<T: Pod + Send + Sync>(&self) -> Vec<T> {
@@ -135,8 +156,6 @@ impl Image {
         let height = self.inner.extent()[1];
         let depth = self.inner.extent()[2];
         let size = (width * height * depth) as usize * bytes_per_pixel;
-
-        let staging = Buffer::new(self.ctx.clone(), vec![0u8; size], Location::Host);
 
         let mut cmd_buf = AutoCommandBufferBuilder::primary(
             self.ctx.command_allocator.clone(),
@@ -148,7 +167,7 @@ impl Image {
         cmd_buf
             .copy_image_to_buffer(CopyImageToBufferInfo::image_buffer(
                 self.inner.clone(),
-                staging.inner::<T>(),
+                self.staging.inner::<T>(),
             ))
             .unwrap();
 
@@ -162,7 +181,56 @@ impl Image {
             .wait(None)
             .unwrap();
 
-        let slice: Vec<T> = staging.read();
+        let slice: Vec<T> = self.staging.read();
         slice
+    }
+    pub fn clear(&self, rgb: [f32; 4]) {
+        let mut builder = AutoCommandBufferBuilder::primary(
+            self.ctx.command_allocator.clone(),
+            self.ctx.queue.queue_family_index(),
+            CommandBufferUsage::OneTimeSubmit,
+        )
+        .unwrap();
+        builder
+            .clear_color_image(ClearColorImageInfo {
+                clear_value: ClearColorValue::Float(rgb),
+                ..ClearColorImageInfo::image(self.inner.clone())
+            })
+            .unwrap()
+            .copy_image_to_buffer(CopyImageToBufferInfo::image_buffer(
+                self.inner.clone(),
+                self.staging.inner::<u8>(),
+            ))
+            .unwrap();
+        let command_buffer = builder.build().unwrap();
+        let future = sync::now(self.ctx.device.clone())
+            .then_execute(self.ctx.queue.clone(), command_buffer)
+            .unwrap()
+            .then_signal_fence_and_flush()
+            .unwrap();
+        future.wait(None).unwrap();
+        let buffer_content = self.staging.read();
+        let image = ImageBuffer::<Rgba<u8>, _>::from_raw(
+            self.extent[0],
+            self.extent[1],
+            &buffer_content[..],
+        )
+        .unwrap();
+        image.save("image.png").unwrap();
+    }
+}
+
+#[cfg(test)]
+mod image_tests {
+    use crate::gpu::{
+        backend::BackendContext,
+        memory::image::{Image, ImageIntent, TexelSize},
+    };
+
+    #[test]
+    fn test() {
+        let ctx = BackendContext::new();
+        let t = Image::new(ctx, TexelSize::RGBA8, ImageIntent::Readback, [800, 600, 1]);
+        t.clear([1.0, 0.3, 0.8, 1.0]);
     }
 }
