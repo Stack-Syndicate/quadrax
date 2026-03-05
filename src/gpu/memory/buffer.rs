@@ -1,18 +1,14 @@
 use bytemuck::{Pod, cast_vec};
-use vulkano::DeviceSize;
 use vulkano::buffer::allocator::{SubbufferAllocator, SubbufferAllocatorCreateInfo};
 use vulkano::command_buffer::PrimaryCommandBufferAbstract;
-use vulkano::memory::DeviceAlignment;
 use vulkano::sync::GpuFuture;
 use vulkano::{
-    buffer::{BufferCreateInfo, BufferUsage, Subbuffer},
+    buffer::{BufferUsage, Subbuffer},
     command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, CopyBufferInfo},
-    memory::allocator::{AllocationCreateInfo, MemoryTypeFilter},
+    memory::allocator::MemoryTypeFilter,
 };
 
-use crate::gpu::backend::BackendContext;
-
-type VulkanoBuffer = vulkano::buffer::Buffer;
+use crate::gpu::device::DeviceContext;
 
 #[derive(Clone)]
 pub enum UpdateMode {
@@ -56,7 +52,7 @@ impl BufferFuture {
 
 #[derive(Clone)]
 pub struct Buffer {
-    ctx: BackendContext,
+    ctx: DeviceContext,
     inner: Subbuffer<[u8]>,
     stage: Option<Box<Buffer>>,
     location: Location,
@@ -64,7 +60,7 @@ pub struct Buffer {
 }
 impl Buffer {
     pub fn new_with_role<T: Pod + Send + Sync>(
-        ctx: BackendContext,
+        ctx: DeviceContext,
         data: Vec<T>,
         location: Location,
         buffer_role: BufferRole,
@@ -186,11 +182,7 @@ impl Buffer {
             },
         }
     }
-    pub fn new<T: Pod + Send + Sync>(
-        ctx: BackendContext,
-        data: Vec<T>,
-        location: Location,
-    ) -> Self {
+    pub fn new<T: Pod + Send + Sync>(ctx: DeviceContext, data: Vec<T>, location: Location) -> Self {
         Self::new_with_role(ctx, data, location, BufferRole::Generic)
     }
     pub fn read<T: Pod + Send + Sync>(&self) -> Vec<T> {

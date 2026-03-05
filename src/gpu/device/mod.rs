@@ -7,34 +7,43 @@ use vulkano::{
     },
     descriptor_set::allocator::StandardDescriptorSetAllocator,
     device::{
-        Device, DeviceCreateInfo, Queue, QueueCreateInfo, QueueFlags, physical::PhysicalDevice,
+        Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo, QueueFlags,
+        physical::PhysicalDevice,
     },
-    instance::{Instance, InstanceCreateFlags, InstanceCreateInfo},
+    instance::{Instance, InstanceCreateFlags, InstanceCreateInfo, InstanceExtensions},
     memory::allocator::StandardMemoryAllocator,
 };
 
 use crate::gpu::memory::buffer::{Buffer, Location};
 
 #[derive(Clone, Debug)]
-pub struct BackendContext {
+pub struct DeviceContext {
+    pub library: Arc<VulkanLibrary>,
+    pub instance: Arc<Instance>,
     pub device: Arc<Device>,
     pub queue: Arc<Queue>,
     pub memory_allocator: Arc<StandardMemoryAllocator>,
     pub command_allocator: Arc<StandardCommandBufferAllocator>,
     pub descriptor_allocator: Arc<StandardDescriptorSetAllocator>,
 }
-impl BackendContext {
-    pub fn new() -> Self {
-        let physical_device = BackendContext::create_physical_device();
-        let queue_family_index = BackendContext::create_queue_family_index(physical_device.clone());
+impl DeviceContext {
+    pub fn new_headless() -> Self {
+        Self::new(InstanceExtensions::default())
+    }
+    pub fn new(extensions: InstanceExtensions) -> Self {
+        let (library, instance, physical_device) =
+            DeviceContext::create_physical_device(extensions);
+        let queue_family_index = DeviceContext::create_queue_family_index(physical_device.clone());
         let (device, queue) =
-            BackendContext::create_device_queue(physical_device, queue_family_index);
+            DeviceContext::create_device_queue(physical_device, queue_family_index);
         let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
         let command_allocator = Arc::new(StandardCommandBufferAllocator::new(
             device.clone(),
             StandardCommandBufferAllocatorCreateInfo::default(),
         ));
         Self {
+            library,
+            instance,
             device: device.clone(),
             queue,
             memory_allocator,
@@ -48,12 +57,15 @@ impl BackendContext {
     pub fn create_buffer<T: Pod + Send + Sync>(&self, data: Vec<T>, location: Location) -> Buffer {
         Buffer::new(self.clone(), data, location)
     }
-    fn create_physical_device() -> Arc<PhysicalDevice> {
+    fn create_physical_device(
+        enabled_extensions: InstanceExtensions,
+    ) -> (Arc<VulkanLibrary>, Arc<Instance>, Arc<PhysicalDevice>) {
         let library = VulkanLibrary::new().expect("No local Vulkan library found.");
         let instance = Instance::new(
-            library,
+            library.clone(),
             InstanceCreateInfo {
                 flags: InstanceCreateFlags::ENUMERATE_PORTABILITY,
+                enabled_extensions,
                 ..Default::default()
             },
         )
@@ -69,7 +81,7 @@ impl BackendContext {
             d.properties().device_type == vulkano::device::physical::PhysicalDeviceType::DiscreteGpu
         }) {
             println!("Using discrete GPU: {}", dev.properties().device_name);
-            return dev.clone();
+            return (library.clone(), instance.clone(), dev.clone());
         }
 
         if let Some(dev) = devices.iter().find(|d| {
@@ -77,7 +89,7 @@ impl BackendContext {
                 == vulkano::device::physical::PhysicalDeviceType::IntegratedGpu
         }) {
             println!("Using integrated GPU: {}", dev.properties().device_name);
-            return dev.clone();
+            return (library.clone(), instance.clone(), dev.clone());
         }
 
         let dev = devices[0].clone();
@@ -86,7 +98,7 @@ impl BackendContext {
             dev.properties().device_name,
             dev.properties().device_type
         );
-        dev
+        (library, instance, dev)
     }
     fn create_queue_family_index(physical_device: Arc<PhysicalDevice>) -> u32 {
         for family in physical_device.queue_family_properties() {
@@ -116,6 +128,10 @@ impl BackendContext {
                     queue_family_index,
                     ..Default::default()
                 }],
+                enabled_extensions: DeviceExtensions {
+                    khr_swapchain: true,
+                    ..Default::default()
+                },
                 ..Default::default()
             },
         )

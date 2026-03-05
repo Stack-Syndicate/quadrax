@@ -18,7 +18,7 @@ use vulkano::{
 
 use crate::gpu::memory::buffer::BufferFuture;
 use crate::gpu::{
-    backend::BackendContext,
+    device::DeviceContext,
     memory::buffer::{Buffer, Location},
 };
 type VulkanoImage = vulkano::image::Image;
@@ -50,7 +50,7 @@ pub type ImageFuture = BufferFuture;
 
 #[derive(Clone)]
 pub struct Image {
-    ctx: BackendContext,
+    ctx: DeviceContext,
     pub inner: Arc<ImageView>,
     extent: [u32; 3],
     texel_size: TexelSize,
@@ -58,7 +58,7 @@ pub struct Image {
 }
 impl Image {
     pub fn new(
-        ctx: BackendContext,
+        ctx: DeviceContext,
         texel_size: TexelSize,
         intent: ImageIntent,
         extent: [u32; 3],
@@ -235,7 +235,7 @@ impl Image {
 
 #[test]
 fn clear_test() {
-    let ctx = BackendContext::new();
+    let ctx = DeviceContext::new_headless();
     let t = Image::new(ctx, TexelSize::RGBA8, ImageIntent::Readback, [800, 600, 1]);
     t.clear([0.0, 0.3, 0.8, 1.0]).wait();
     t.save("image.png");

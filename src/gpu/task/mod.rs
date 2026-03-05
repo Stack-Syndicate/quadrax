@@ -1,18 +1,16 @@
+pub mod manager;
+
 use crate::gpu::{
-    backend::BackendContext,
+    device::DeviceContext,
     memory::{
-        BufferID, BufferRegistry, ImageRegistry,
         buffer::{Buffer, BufferRole, Location},
         image::{Image, ImageIntent, TexelSize},
     },
+    task::manager::TaskManager,
 };
 use bytemuck::{Pod, Zeroable};
-use std::{
-    collections::{HashSet, VecDeque},
-    sync::Arc,
-};
+use std::sync::Arc;
 use vulkano::{
-    buffer::view,
     command_buffer::{
         AutoCommandBufferBuilder, RenderPassBeginInfo, SubpassBeginInfo, SubpassContents,
         SubpassEndInfo,
@@ -48,16 +46,16 @@ use vulkano::{
 type VulkanoImage = vulkano::image::Image;
 #[derive(Pod, Zeroable, Vertex, Clone, Copy, Debug)]
 #[repr(C)]
-struct DefaultVertex {
+pub struct DefaultVertex {
     #[format(R32G32_SFLOAT)]
-    position: [f32; 2],
+    pub position: [f32; 2],
 }
 pub enum TaskType {
     Compute,
     Graphics,
 }
 pub struct Task {
-    ctx: BackendContext,
+    ctx: DeviceContext,
     compute_pipeline: Option<Arc<ComputePipeline>>,
     graphics_pipeline: Option<Arc<GraphicsPipeline>>,
     task_type: TaskType,
@@ -68,7 +66,7 @@ pub struct Task {
 }
 impl Task {
     pub fn new_graphics<V>(
-        ctx: BackendContext,
+        ctx: DeviceContext,
         vertex_shader: Arc<ShaderModule>,
         fragment_shader: Arc<ShaderModule>,
         read_buffers: Vec<Arc<Buffer>>,
@@ -177,7 +175,7 @@ impl Task {
     }
 
     pub fn new_compute(
-        ctx: BackendContext,
+        ctx: DeviceContext,
         shader: Arc<ShaderModule>,
         read_buffers: Vec<Arc<Buffer>>,
         write_buffers: Vec<Arc<Buffer>>,
@@ -214,12 +212,12 @@ impl Task {
             write_images,
         }
     }
-    pub fn execute(&self, ctx: BackendContext, group_counts: [u32; 3]) -> Box<dyn GpuFuture> {
+    pub fn execute(&self, ctx: DeviceContext, group_counts: [u32; 3]) -> Box<dyn GpuFuture> {
         self.execute_typed::<DefaultVertex>(ctx, group_counts)
     }
     pub fn execute_typed<V: Vertex>(
         &self,
-        ctx: BackendContext,
+        ctx: DeviceContext,
         group_counts: [u32; 3],
     ) -> Box<dyn GpuFuture> {
         let read_buffer_descriptor_sets = self
@@ -356,66 +354,9 @@ impl Task {
     }
 }
 
-pub struct TaskManager {
-    ctx: BackendContext,
-    tasks: VecDeque<Task>,
-    buffer_registry: BufferRegistry,
-    image_registry: ImageRegistry,
-    used_buffer_ids: HashSet<BufferID>,
-    used_image_ids: HashSet<BufferID>,
-}
-impl TaskManager {
-    pub fn new(ctx: BackendContext) -> Self {
-        Self {
-            ctx,
-            tasks: VecDeque::new(),
-            buffer_registry: BufferRegistry::new(),
-            image_registry: ImageRegistry::new(),
-            used_buffer_ids: HashSet::new(),
-            used_image_ids: HashSet::new(),
-        }
-    }
-    pub fn add_compute_task(
-        &mut self,
-        compute_shader: Arc<ShaderModule>,
-        read_buffers: Vec<Arc<Buffer>>,
-        read_images: Vec<Arc<Image>>,
-        write_buffers: Vec<Arc<Buffer>>,
-        write_images: Vec<Arc<Image>>,
-    ) {
-        self.tasks.push_front(Task::new_compute(
-            self.ctx.clone(),
-            compute_shader,
-            read_buffers,
-            write_buffers,
-            read_images,
-            write_images,
-        ));
-    }
-    fn add_graphics_task<V: Vertex>(
-        &mut self,
-        vertex_shader: Arc<ShaderModule>,
-        fragment_shader: Arc<ShaderModule>,
-        read_buffers: Vec<Arc<Buffer>>,
-        read_images: Vec<Arc<Image>>,
-        write_buffers: Vec<Arc<Buffer>>,
-        write_images: Vec<Arc<Image>>,
-    ) {
-        self.tasks.push_front(Task::new_graphics::<V>(
-            self.ctx.clone(),
-            vertex_shader,
-            fragment_shader,
-            read_buffers,
-            write_buffers,
-            read_images,
-            write_images,
-        ));
-    }
-}
-
 #[test]
 fn compute_task() {
-    let ctx = BackendContext::new();
+    let ctx = DeviceContext::new_headless();
     let mut tm = TaskManager::new(ctx.clone());
     mod shader {
         vulkano_shaders::shader! {
@@ -465,7 +406,7 @@ fn compute_task() {
 
 #[test]
 fn graphics_task() {
-    let ctx = BackendContext::new();
+    let ctx = DeviceContext::new_headless();
     let mut tm = TaskManager::new(ctx.clone());
     mod vert {
         vulkano_shaders::shader! {

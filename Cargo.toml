@@ -1,6 +1,6 @@
 [package]
 name = "quadrax"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
 description = "Weird graphics library."
 license-file = "./LICENSE"
@@ -10,7 +10,7 @@ opt-level = 1
 
 [dependencies]
 bytemuck = { version = "1.25.0", features = ["derive"] }
-image = "0.25.9"
-vulkano = "0.35.2"
-vulkano-shaders = "0.35.0"
-vulkano-util = "0.35.0"
+image = { version = "0.25.9", default-features = false, features = ["png"] }
+vulkano = { version = "0.35.2", default-features = false, features = ["macros"] }
+vulkano-shaders = { version = "0.35.0", default-features = false }
+winit = "0.30.13"
