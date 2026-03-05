@@ -5,6 +5,8 @@ use vulkano::command_buffer::{
     ClearColorImageInfo, CommandBufferUsage, CopyBufferToImageInfo, CopyImageToBufferInfo,
 };
 use vulkano::format::ClearColorValue;
+use vulkano::image::view::{ImageView, ImageViewCreateInfo};
+use vulkano::image::{ImageAspects, ImageSubresourceRange};
 use vulkano::sync::{self, now};
 use vulkano::{
     command_buffer::AutoCommandBufferBuilder,
@@ -19,7 +21,6 @@ use crate::gpu::{
     backend::BackendContext,
     memory::buffer::{Buffer, Location},
 };
-
 type VulkanoImage = vulkano::image::Image;
 pub enum ImageIntent {
     Texture,
@@ -47,10 +48,12 @@ impl TexelSize {
 
 pub type ImageFuture = BufferFuture;
 
+#[derive(Clone)]
 pub struct Image {
     ctx: BackendContext,
-    inner: Arc<VulkanoImage>,
+    pub inner: Arc<ImageView>,
     extent: [u32; 3],
+    texel_size: TexelSize,
     staging: Buffer,
 }
 impl Image {
@@ -89,6 +92,19 @@ impl Image {
             },
         )
         .unwrap();
+        let image_view = ImageView::new(
+            image.clone(),
+            ImageViewCreateInfo {
+                subresource_range: ImageSubresourceRange {
+                    aspects: ImageAspects::COLOR,
+                    ..image.subresource_range()
+                },
+                format: image.format(),
+                usage: image.usage(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         let staging = Buffer::new(
             ctx.clone(),
             vec![0u8; extent.iter().product::<u32>() as usize * texel_size.format() as usize],
@@ -96,9 +112,10 @@ impl Image {
         );
         Self {
             ctx,
-            inner: image,
+            inner: image_view,
             extent,
             staging,
+            texel_size,
         }
     }
     fn usage_and_memory(intent: ImageIntent) -> (ImageUsage, MemoryTypeFilter) {
@@ -116,7 +133,7 @@ impl Image {
                 MemoryTypeFilter::PREFER_DEVICE,
             ),
             ImageIntent::Readback => (
-                ImageUsage::TRANSFER_SRC | ImageUsage::TRANSFER_DST,
+                ImageUsage::TRANSFER_SRC | ImageUsage::TRANSFER_DST | ImageUsage::COLOR_ATTACHMENT,
                 MemoryTypeFilter::PREFER_HOST,
             ),
         }
@@ -133,7 +150,7 @@ impl Image {
         cmd_buf
             .copy_buffer_to_image(CopyBufferToImageInfo::buffer_image(
                 self.staging.inner::<T>(),
-                self.inner.clone(),
+                self.inner.image().clone(),
             ))
             .unwrap();
 
@@ -158,7 +175,7 @@ impl Image {
 
         cmd_buf
             .copy_image_to_buffer(CopyImageToBufferInfo::image_buffer(
-                self.inner.clone(),
+                self.inner.image().clone(),
                 self.staging.inner::<T>(),
             ))
             .unwrap();
@@ -176,7 +193,7 @@ impl Image {
         let slice: Vec<T> = self.staging.read();
         slice
     }
-    pub fn clear(&self, rgb: [f32; 4]) {
+    pub fn clear(&self, rgb: [f32; 4]) -> BufferFuture {
         let mut builder = AutoCommandBufferBuilder::primary(
             self.ctx.command_allocator.clone(),
             self.ctx.queue.queue_family_index(),
@@ -186,11 +203,11 @@ impl Image {
         builder
             .clear_color_image(ClearColorImageInfo {
                 clear_value: ClearColorValue::Float(rgb),
-                ..ClearColorImageInfo::image(self.inner.clone())
+                ..ClearColorImageInfo::image(self.inner.image().clone())
             })
             .unwrap()
             .copy_image_to_buffer(CopyImageToBufferInfo::image_buffer(
-                self.inner.clone(),
+                self.inner.image().clone(),
                 self.staging.inner::<u8>(),
             ))
             .unwrap();
@@ -200,29 +217,26 @@ impl Image {
             .unwrap()
             .then_signal_fence_and_flush()
             .unwrap();
-        future.wait(None).unwrap();
-        let buffer_content = self.staging.read();
-        let image = ImageBuffer::<Rgba<u8>, _>::from_raw(
-            self.extent[0],
-            self.extent[1],
-            &buffer_content[..],
-        )
-        .unwrap();
-        image.save("image.png").unwrap();
+        BufferFuture {
+            inner: Some(future.boxed()),
+        }
+    }
+    pub fn save(&self, path: &str) {
+        let content = self.read();
+        let image =
+            ImageBuffer::<Rgba<u8>, _>::from_raw(self.extent[0], self.extent[1], &content[..])
+                .unwrap();
+        image.save(path).unwrap();
+    }
+    pub fn texel(&self) -> TexelSize {
+        self.texel_size.clone()
     }
 }
 
-#[cfg(test)]
-mod image_tests {
-    use crate::gpu::{
-        backend::BackendContext,
-        memory::image::{Image, ImageIntent, TexelSize},
-    };
-
-    #[test]
-    fn test() {
-        let ctx = BackendContext::new();
-        let t = Image::new(ctx, TexelSize::RGBA8, ImageIntent::Readback, [800, 600, 1]);
-        t.clear([1.0, 0.3, 0.8, 1.0]);
-    }
+#[test]
+fn clear_test() {
+    let ctx = BackendContext::new();
+    let t = Image::new(ctx, TexelSize::RGBA8, ImageIntent::Readback, [800, 600, 1]);
+    t.clear([0.0, 0.3, 0.8, 1.0]).wait();
+    t.save("image.png");
 }

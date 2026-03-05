@@ -1,5 +1,8 @@
 use bytemuck::{Pod, cast_vec};
+use vulkano::DeviceSize;
+use vulkano::buffer::allocator::{SubbufferAllocator, SubbufferAllocatorCreateInfo};
 use vulkano::command_buffer::PrimaryCommandBufferAbstract;
+use vulkano::memory::DeviceAlignment;
 use vulkano::sync::GpuFuture;
 use vulkano::{
     buffer::{BufferCreateInfo, BufferUsage, Subbuffer},
@@ -11,15 +14,24 @@ use crate::gpu::backend::BackendContext;
 
 type VulkanoBuffer = vulkano::buffer::Buffer;
 
+#[derive(Clone)]
 pub enum UpdateMode {
     Static,
     Dynamic,
     Readback,
 }
 
+#[derive(Clone)]
 pub enum Location {
     Device(UpdateMode),
     Host,
+}
+
+pub enum BufferRole {
+    Uniform,
+    Storage,
+    Vertex,
+    Generic,
 }
 
 pub struct BufferFuture {
@@ -42,110 +54,151 @@ impl BufferFuture {
     }
 }
 
+#[derive(Clone)]
 pub struct Buffer {
     ctx: BackendContext,
     inner: Subbuffer<[u8]>,
     stage: Option<Box<Buffer>>,
     location: Location,
+    pub length: u32,
 }
 impl Buffer {
+    pub fn new_with_role<T: Pod + Send + Sync>(
+        ctx: BackendContext,
+        data: Vec<T>,
+        location: Location,
+        buffer_role: BufferRole,
+    ) -> Self {
+        let role_usage = match buffer_role {
+            BufferRole::Uniform => BufferUsage::UNIFORM_BUFFER,
+            BufferRole::Storage => BufferUsage::STORAGE_BUFFER,
+            BufferRole::Vertex => BufferUsage::VERTEX_BUFFER,
+            BufferRole::Generic => BufferUsage::empty(),
+        };
+        match location {
+            Location::Host => {
+                let subbuffer_allocator = SubbufferAllocator::new(
+                    ctx.memory_allocator.clone(),
+                    SubbufferAllocatorCreateInfo {
+                        buffer_usage: BufferUsage::TRANSFER_SRC
+                            | BufferUsage::TRANSFER_DST
+                            | role_usage,
+                        memory_type_filter: MemoryTypeFilter::HOST_RANDOM_ACCESS
+                            | MemoryTypeFilter::PREFER_HOST,
+                        ..Default::default()
+                    },
+                );
+                let inner = subbuffer_allocator
+                    .allocate_slice(data.len() as u64)
+                    .unwrap();
+                {
+                    let mut write_lock = inner.write().unwrap();
+                    write_lock.copy_from_slice(&data);
+                }
+                Self {
+                    ctx: ctx.clone(),
+                    inner: inner.into_bytes(),
+                    stage: None,
+                    location,
+                    length: data.len() as u32,
+                }
+            }
+            Location::Device(ref update_mode) => match update_mode {
+                UpdateMode::Static => {
+                    let subbuffer_allocator = SubbufferAllocator::new(
+                        ctx.memory_allocator.clone(),
+                        SubbufferAllocatorCreateInfo {
+                            buffer_usage: BufferUsage::TRANSFER_DST | role_usage,
+                            memory_type_filter: MemoryTypeFilter::PREFER_DEVICE,
+                            ..Default::default()
+                        },
+                    );
+                    let inner = subbuffer_allocator
+                        .allocate_slice(data.len() as u64)
+                        .unwrap();
+                    {
+                        let mut write_lock = inner.write().unwrap();
+                        write_lock.copy_from_slice(&data);
+                    }
+                    Self {
+                        ctx: ctx.clone(),
+                        inner: inner.into_bytes(),
+                        stage: None,
+                        location,
+                        length: data.len() as u32,
+                    }
+                }
+                UpdateMode::Dynamic => {
+                    let subbuffer_allocator = SubbufferAllocator::new(
+                        ctx.memory_allocator.clone(),
+                        SubbufferAllocatorCreateInfo {
+                            buffer_usage: BufferUsage::TRANSFER_SRC
+                                | BufferUsage::TRANSFER_DST
+                                | role_usage,
+                            memory_type_filter: MemoryTypeFilter::PREFER_DEVICE,
+                            ..Default::default()
+                        },
+                    );
+                    let inner = subbuffer_allocator
+                        .allocate_slice(data.len() as u64)
+                        .unwrap();
+                    {
+                        let mut write_lock = inner.write().unwrap();
+                        write_lock.copy_from_slice(&data);
+                    }
+                    Self {
+                        ctx: ctx.clone(),
+                        inner: inner.into_bytes(),
+                        stage: Some(Box::new(Buffer::new_with_role(
+                            ctx.clone(),
+                            data.clone(),
+                            Location::Host,
+                            buffer_role,
+                        ))),
+                        location,
+                        length: data.len() as u32,
+                    }
+                }
+                UpdateMode::Readback => {
+                    let subbuffer_allocator = SubbufferAllocator::new(
+                        ctx.memory_allocator.clone(),
+                        SubbufferAllocatorCreateInfo {
+                            buffer_usage: BufferUsage::TRANSFER_SRC | role_usage,
+                            memory_type_filter: MemoryTypeFilter::PREFER_DEVICE,
+                            ..Default::default()
+                        },
+                    );
+                    let inner = subbuffer_allocator
+                        .allocate_slice(data.len() as u64)
+                        .unwrap();
+                    {
+                        let mut write_lock = inner.write().unwrap();
+                        write_lock.copy_from_slice(&data);
+                    }
+                    Self {
+                        ctx: ctx.clone(),
+                        inner: inner.into_bytes(),
+                        stage: None,
+                        location,
+                        length: data.len() as u32,
+                    }
+                }
+            },
+        }
+    }
     pub fn new<T: Pod + Send + Sync>(
         ctx: BackendContext,
         data: Vec<T>,
         location: Location,
     ) -> Self {
-        let data_bytes = cast_vec(data);
-        match location {
-            Location::Host => Self {
-                ctx: ctx.clone(),
-                inner: VulkanoBuffer::from_iter(
-                    ctx.memory_allocator,
-                    BufferCreateInfo {
-                        usage: BufferUsage::TRANSFER_SRC | BufferUsage::TRANSFER_DST,
-                        ..Default::default()
-                    },
-                    AllocationCreateInfo {
-                        memory_type_filter: MemoryTypeFilter::HOST_RANDOM_ACCESS
-                            | MemoryTypeFilter::PREFER_HOST,
-                        ..Default::default()
-                    },
-                    data_bytes,
-                )
-                .expect("Could not create host buffer."),
-                stage: None,
-                location,
-            },
-            Location::Device(ref update_mode) => match update_mode {
-                UpdateMode::Static => Self {
-                    ctx: ctx.clone(),
-                    inner: VulkanoBuffer::from_iter(
-                        ctx.memory_allocator,
-                        BufferCreateInfo {
-                            usage: BufferUsage::TRANSFER_DST,
-                            ..Default::default()
-                        },
-                        AllocationCreateInfo {
-                            memory_type_filter: MemoryTypeFilter::PREFER_DEVICE,
-                            ..Default::default()
-                        },
-                        data_bytes,
-                    )
-                    .expect("Could not create static device buffer."),
-                    stage: None,
-                    location,
-                },
-                UpdateMode::Dynamic => Self {
-                    ctx: ctx.clone(),
-                    inner: VulkanoBuffer::from_iter(
-                        ctx.memory_allocator.clone(),
-                        BufferCreateInfo {
-                            usage: BufferUsage::TRANSFER_SRC | BufferUsage::TRANSFER_DST,
-                            ..Default::default()
-                        },
-                        AllocationCreateInfo {
-                            memory_type_filter: MemoryTypeFilter::PREFER_DEVICE,
-                            ..Default::default()
-                        },
-                        data_bytes.clone(),
-                    )
-                    .expect("Could not create dynamic device buffer."),
-                    stage: Some(Box::new(Buffer::new(
-                        ctx.clone(),
-                        data_bytes,
-                        Location::Host,
-                    ))),
-                    location,
-                },
-                UpdateMode::Readback => Self {
-                    ctx: ctx.clone(),
-                    inner: VulkanoBuffer::from_iter(
-                        ctx.memory_allocator,
-                        BufferCreateInfo {
-                            usage: BufferUsage::TRANSFER_SRC,
-                            ..Default::default()
-                        },
-                        AllocationCreateInfo {
-                            memory_type_filter: MemoryTypeFilter::PREFER_DEVICE,
-                            ..Default::default()
-                        },
-                        data_bytes,
-                    )
-                    .expect("Could not create host buffer."),
-                    stage: None,
-                    location,
-                },
-            },
-        }
+        Self::new_with_role(ctx, data, location, BufferRole::Generic)
     }
     pub fn read<T: Pod + Send + Sync>(&self) -> Vec<T> {
         match &self.location {
             Location::Host => {
-                let slice = self
-                    .inner
-                    .read()
-                    .expect("Could not read host buffer.")
-                    .to_vec();
-                cast_vec(slice)
+                let subbuffer = self.inner.clone().reinterpret::<[T]>();
+                let read_lock = subbuffer.read().expect("Could not read host buffer.");
+                read_lock.to_vec()
             }
             Location::Device(update_mode) => match update_mode {
                 UpdateMode::Static => panic!("Cannot read back from static buffer."),
@@ -169,25 +222,26 @@ impl Buffer {
         }
     }
     pub fn stage<T: Pod + Send + Sync>(&self) -> BufferFuture {
-        match &self.location {
-            Location::Host => panic!("Cannot stage host buffer."),
-            Location::Device(update_mode) => match update_mode {
-                UpdateMode::Static => panic!("Cannot stage a static buffer."),
-                UpdateMode::Dynamic => {
-                    if let Some(stage) = &self.stage {
-                        return stage.stage::<T>();
-                    } else {
-                        panic!("Dynamic buffer missing stage host buffer.")
-                    }
-                }
-                UpdateMode::Readback => {
-                    if let Some(stage) = &self.stage {
-                        return stage.stage::<T>();
-                    } else {
-                        panic!("Readback buffer missing stage host buffer.")
-                    }
-                }
-            },
+        if let Some(stage) = &self.stage {
+            let mut builder = AutoCommandBufferBuilder::primary(
+                self.ctx.command_allocator.clone(),
+                self.ctx.queue.queue_family_index(),
+                CommandBufferUsage::OneTimeSubmit,
+            )
+            .unwrap();
+            builder
+                .copy_buffer(CopyBufferInfo::buffers(
+                    self.inner.clone(),
+                    stage.inner.clone(),
+                ))
+                .unwrap();
+            let cb = builder.build().unwrap();
+            let future = cb.execute(self.ctx.queue.clone()).unwrap();
+            BufferFuture {
+                inner: Some(future.boxed()),
+            }
+        } else {
+            panic!("This buffer type does not have a staging buffer.")
         }
     }
     pub fn write<T: Pod + Send + Sync>(&mut self, data: Vec<T>) -> BufferFuture {
@@ -196,6 +250,7 @@ impl Buffer {
             Location::Host => {
                 let mut slice = self.inner.write().unwrap();
                 slice.copy_from_slice(&data_bytes);
+                return BufferFuture { inner: None };
             }
             Location::Device(update_mode) => match update_mode {
                 UpdateMode::Static => {
@@ -220,13 +275,16 @@ impl Buffer {
 
                         let command_buffer = builder.build().unwrap();
 
-                        let finished = command_buffer
+                        let future = command_buffer
                             .execute(self.ctx.queue.clone())
                             .unwrap()
                             .then_signal_fence_and_flush()
                             .unwrap();
-
-                        finished.wait(None).unwrap();
+                        return BufferFuture {
+                            inner: Some(future.boxed()),
+                        };
+                    } else {
+                        panic!("Dynamic device buffer staging is missing!");
                     }
                 }
                 UpdateMode::Readback => {
@@ -234,7 +292,6 @@ impl Buffer {
                 }
             },
         }
-        todo!()
     }
     pub fn inner<T: Pod + Send + Sync>(&self) -> Subbuffer<[T]> {
         let inner = self.inner_bytes();

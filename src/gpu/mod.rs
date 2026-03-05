@@ -1,3 +1,4 @@
 pub mod backend;
 pub mod memory;
-pub mod pipeline;
+pub mod rendering;
+pub mod task;

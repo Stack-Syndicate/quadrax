@@ -5,6 +5,9 @@ edition = "2024"
 description = "Weird graphics library."
 license-file = "./LICENSE"
 
+[profile.dev]
+opt-level = 1 
+
 [dependencies]
 bytemuck = { version = "1.25.0", features = ["derive"] }
 image = "0.25.9"
