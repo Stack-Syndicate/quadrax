@@ -28,9 +28,6 @@ impl Backend {
             })
             .await
             .unwrap();
-        let encoder = Arc::new(Mutex::new(
-            device.create_command_encoder(&Default::default()),
-        ));
         Self {
             instance,
             adapter,

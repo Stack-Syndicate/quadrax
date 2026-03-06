@@ -6,7 +6,7 @@ use wgpu::util::DeviceExt;
 use bytemuck::{Pod, cast_slice};
 use wgpu::{BufferDescriptor, util::BufferInitDescriptor};
 
-use crate::gpu::backend::{self, Backend};
+use crate::gpu::backend::Backend;
 
 #[derive(Clone, Debug)]
 pub enum BufferRole {
