@@ -1,3 +1,6 @@
+use std::sync::Arc;
+
+use futures::lock::Mutex;
 use wgpu::Features;
 
 pub struct Backend {
@@ -25,11 +28,17 @@ impl Backend {
             })
             .await
             .unwrap();
+        let encoder = Arc::new(Mutex::new(
+            device.create_command_encoder(&Default::default()),
+        ));
         Self {
             instance,
             adapter,
             device,
             queue,
         }
+    }
+    pub fn arc_mutex(self) -> Arc<Mutex<Self>> {
+        Arc::new(Mutex::new(self))
     }
 }

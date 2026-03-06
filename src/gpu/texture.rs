@@ -3,6 +3,7 @@ use crate::gpu::{
     buffer::{Buffer, BufferRole},
 };
 use bytemuck::Pod;
+use futures::lock::Mutex;
 use std::sync::Arc;
 use wgpu::{COPY_BYTES_PER_ROW_ALIGNMENT, Extent3d, TexelCopyBufferInfo};
 
@@ -35,13 +36,13 @@ pub struct Texture {
     pub inner: Arc<wgpu::Texture>,
     pub view: Arc<wgpu::TextureView>,
     pub usage: Arc<wgpu::TextureUsages>,
-    pub backend: Arc<Backend>,
+    pub backend: Arc<Mutex<Backend>>,
     pub size: wgpu::Extent3d,
     pub format: TextureFormat,
 }
 impl Texture {
-    pub fn new_empty(
-        backend: Arc<Backend>,
+    pub async fn new_empty(
+        backend: Arc<Mutex<Backend>>,
         size: &[u32; 3],
         role: TextureRole,
         format: TextureFormat,
@@ -52,7 +53,8 @@ impl Texture {
             depth_or_array_layers: size[2],
             ..Default::default()
         };
-        let inner = backend.device.create_texture(&wgpu::TextureDescriptor {
+        let device = backend.lock().await.device.clone();
+        let inner = device.create_texture(&wgpu::TextureDescriptor {
             label: None,
             size,
             mip_level_count: 1,
@@ -73,6 +75,7 @@ impl Texture {
         }
     }
     pub async fn read<T: Pod>(&self) -> Vec<T> {
+        let device = self.backend.lock().await.device.clone();
         let bytes_per_pixel = std::mem::size_of::<T>() as u32;
         let bytes_per_row = (self.size.width * bytes_per_pixel + COPY_BYTES_PER_ROW_ALIGNMENT - 1)
             / COPY_BYTES_PER_ROW_ALIGNMENT
@@ -81,11 +84,10 @@ impl Texture {
             self.backend.clone(),
             (bytes_per_row * self.size.height * self.size.depth_or_array_layers).into(),
             BufferRole::StagingRead,
-        );
-        let mut encoder = self
-            .backend
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        )
+        .await;
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         encoder.copy_texture_to_buffer(
             self.inner.as_image_copy(),
             TexelCopyBufferInfo {
@@ -97,12 +99,15 @@ impl Texture {
             },
             self.size,
         );
-        self.backend.queue.submit(Some(encoder.finish()));
+        self.backend
+            .lock()
+            .await
+            .queue
+            .submit(Some(encoder.finish()));
         let buffer_slice = staging.inner.slice(..);
         let (sender, receiver) = futures::channel::oneshot::channel();
         buffer_slice.map_async(wgpu::MapMode::Read, move |res| sender.send(res).unwrap());
-        self.backend
-            .device
+        device
             .poll(wgpu::PollType::Wait {
                 submission_index: None,
                 timeout: None,
@@ -145,12 +150,11 @@ impl Texture {
             self.backend.clone(),
             staging_bytes,
             BufferRole::StagingWrite,
-        );
-
-        let mut encoder = self
-            .backend
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        )
+        .await;
+        let device = self.backend.lock().await.device.clone();
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         encoder.copy_buffer_to_texture(
             TexelCopyBufferInfo {
                 buffer: &staging.inner,
@@ -162,9 +166,12 @@ impl Texture {
             self.inner.as_image_copy(),
             self.size,
         );
-        self.backend.queue.submit(Some(encoder.finish()));
         self.backend
-            .device
+            .lock()
+            .await
+            .queue
+            .submit(Some(encoder.finish()));
+        device
             .poll(wgpu::PollType::Wait {
                 submission_index: None,
                 timeout: None,
@@ -175,14 +182,22 @@ impl Texture {
 
 #[pollster::test]
 async fn texture_crud() {
+    use image::{ImageBuffer, Rgba};
     let backend = Backend::new().await;
     let texture = Texture::new_empty(
-        backend.into(),
+        backend.arc_mutex(),
         &[64, 1, 1],
         TextureRole::Generic,
         TextureFormat::Rgba8Uint,
-    );
-    println!("{:?}", texture.read::<[u8; 4]>().await);
-    texture.write(&vec![[255u8; 4]; 64 * 1]).await;
-    println!("{:?}", texture.read::<[u8; 4]>().await);
+    )
+    .await;
+    assert_eq!(texture.read::<[u8; 4]>().await, [[0u8; 4]; 64 * 1]);
+    texture
+        .write(&vec![[255u8, 0u8, 100u8, 255u8]; 64 * 1])
+        .await;
+    let final_read = texture.read::<[u8; 4]>().await;
+    assert_eq!(final_read, vec![[255u8, 0u8, 100u8, 255u8]; 64 * 1]);
+    let raw_bytes = final_read.into_iter().flatten().collect();
+    let img = ImageBuffer::<Rgba<u8>, Vec<u8>>::from_vec(64, 1, raw_bytes).unwrap();
+    img.save("image.png").unwrap();
 }
