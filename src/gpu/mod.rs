@@ -1,4 +1,4 @@
-pub mod device;
-pub mod memory;
+pub mod backend;
+pub mod buffer;
 pub mod task;
-pub mod window;
+pub mod texture;
