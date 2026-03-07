@@ -1,4 +1,4 @@
-use quadrax::cpu::maths::vector::Vector;
+use quadrax::cpu::calculation::maths::vector::Vector;
 
 #[pollster::test]
 async fn add_prod_dot_cross() {

@@ -1,9 +1,9 @@
 use petgraph::graph::{DiGraph, NodeIndex};
 
-use crate::gpu::task::{compute::ComputeTask, graphics::GraphicsTask};
+use crate::gpu::task::{compute::ComputeTask, gfx::GraphicsTask};
 
 pub mod compute;
-pub mod graphics;
+pub mod gfx;
 
 pub enum TaskID {
     Compute(NodeIndex),

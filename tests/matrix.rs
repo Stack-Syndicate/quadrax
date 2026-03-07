@@ -1,4 +1,4 @@
-use quadrax::cpu::maths::matrix::Matrix;
+use quadrax::cpu::calculation::maths::matrix::Matrix;
 
 #[pollster::test]
 async fn matrix_operations_various_shapes() {

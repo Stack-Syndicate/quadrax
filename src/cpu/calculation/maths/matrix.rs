@@ -1,6 +1,5 @@
+use crate::cpu::calculation::maths::vector::Vector;
 use std::ops::BitOr;
-
-use crate::cpu::maths::vector::Vector;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Matrix<const NX: usize, const NY: usize> {
@@ -18,7 +17,6 @@ macro_rules! impl_elementwise_ops {
                     Self { inner }
                 }
             }
-
             impl<const NX: usize, const NY: usize> std::ops::$trait<&Self> for Matrix<NX, NY> {
                 type Output = Self;
 
@@ -27,7 +25,6 @@ macro_rules! impl_elementwise_ops {
                     Self { inner }
                 }
             }
-
             impl<const NX: usize, const NY: usize> std::ops::$trait for &Matrix<NX, NY> {
                 type Output = Matrix<NX, NY>;
 
@@ -36,7 +33,6 @@ macro_rules! impl_elementwise_ops {
                     Matrix { inner }
                 }
             }
-
             impl<const NX: usize, const NY: usize> std::ops::$trait<&Self> for &Matrix<NX, NY> {
                 type Output = Matrix<NX, NY>;
 
@@ -50,7 +46,6 @@ macro_rules! impl_elementwise_ops {
 }
 
 impl_elementwise_ops!(Add => add, Sub => sub, Mul => mul, Div => div);
-
 impl<const NX: usize, const NY: usize> Matrix<NX, NY> {
     pub fn new(data: [[f32; NX]; NY]) -> Self {
         let inner = data.map(Vector::new);
@@ -82,7 +77,6 @@ impl<const NX: usize, const NY: usize> Matrix<NX, NY> {
         &self.inner[i]
     }
 }
-
 impl<const NX: usize, const NY: usize, const NZ: usize> BitOr<Matrix<NZ, NX>> for Matrix<NX, NY> {
     type Output = Matrix<NZ, NY>;
     fn bitor(self, rhs: Matrix<NZ, NX>) -> Self::Output {
