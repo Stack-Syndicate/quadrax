@@ -1,6 +1,5 @@
 use std::{fs, sync::Arc};
-
-use futures::{StreamExt, lock::Mutex, stream};
+use tokio::sync::Mutex;
 use wgpu::CommandEncoderDescriptor;
 
 use crate::gpu::{
@@ -71,24 +70,21 @@ impl ComputeTask {
         }
     }
     pub async fn execute(&self) {
-        let temp_buffers = stream::iter(&self.output_buffers)
-            .enumerate()
-            .filter_map(|(i, b)| async move {
-                match b.role {
-                    BufferRole::Uniform | BufferRole::Vertex => None,
-                    _ => Some((
-                        i,
-                        Buffer::new_empty::<u8>(
-                            self.backend.clone(),
-                            b.size,
-                            BufferRole::StagingRead,
-                        )
-                        .await,
-                    )),
+        let mut temp_buffers = Vec::new();
+        for (i, b) in self.output_buffers.iter().enumerate() {
+            match b.role {
+                BufferRole::Uniform | BufferRole::Vertex => {}
+                _ => {
+                    let temp = Buffer::new_empty::<u8>(
+                        self.backend.clone(),
+                        b.size,
+                        BufferRole::StagingRead,
+                    )
+                    .await;
+                    temp_buffers.push((i, temp));
                 }
-            })
-            .collect::<Vec<_>>()
-            .await;
+            }
+        }
         let (mut encoder, queue) = {
             let backend_lock = self.backend.lock().await;
             (

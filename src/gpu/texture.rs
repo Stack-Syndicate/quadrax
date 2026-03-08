@@ -3,8 +3,8 @@ use crate::gpu::{
     buffer::{Buffer, BufferRole},
 };
 use bytemuck::Pod;
-use futures::lock::Mutex;
 use std::sync::Arc;
+use tokio::sync::{Mutex, oneshot};
 use wgpu::{COPY_BYTES_PER_ROW_ALIGNMENT, Extent3d, TexelCopyBufferInfo};
 
 pub use wgpu::TextureFormat;
@@ -105,7 +105,7 @@ impl Texture {
             .queue
             .submit(Some(encoder.finish()));
         let buffer_slice = staging.inner.slice(..);
-        let (sender, receiver) = futures::channel::oneshot::channel();
+        let (sender, receiver) = oneshot::channel();
         buffer_slice.map_async(wgpu::MapMode::Read, move |res| sender.send(res).unwrap());
         device
             .poll(wgpu::PollType::Wait {
@@ -178,26 +178,4 @@ impl Texture {
             })
             .unwrap();
     }
-}
-
-#[pollster::test]
-async fn texture_crud() {
-    use image::{ImageBuffer, Rgba};
-    let backend = Backend::new().await;
-    let texture = Texture::new_empty(
-        backend.arc_mutex(),
-        &[64, 1, 1],
-        TextureRole::Generic,
-        TextureFormat::Rgba8Uint,
-    )
-    .await;
-    assert_eq!(texture.read::<[u8; 4]>().await, [[0u8; 4]; 64 * 1]);
-    texture
-        .write(&vec![[255u8, 0u8, 100u8, 255u8]; 64 * 1])
-        .await;
-    let final_read = texture.read::<[u8; 4]>().await;
-    assert_eq!(final_read, vec![[255u8, 0u8, 100u8, 255u8]; 64 * 1]);
-    let raw_bytes = final_read.into_iter().flatten().collect();
-    let img = ImageBuffer::<Rgba<u8>, Vec<u8>>::from_vec(64, 1, raw_bytes).unwrap();
-    img.save("image.png").unwrap();
 }

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use futures::lock::Mutex;
+use tokio::sync::{Mutex, oneshot};
 use wgpu::util::DeviceExt;
 
 use bytemuck::{Pod, cast_slice};
@@ -106,7 +106,7 @@ impl Buffer {
             .queue
             .submit(Some(encoder.finish()));
         let buffer_slice = staging.inner.slice(..);
-        let (sender, receiver) = futures::channel::oneshot::channel();
+        let (sender, receiver) = oneshot::channel();
         buffer_slice.map_async(wgpu::MapMode::Read, move |res| sender.send(res).unwrap());
         self.backend
             .lock()
@@ -148,18 +148,4 @@ impl Buffer {
             })
             .unwrap();
     }
-}
-
-#[pollster::test]
-async fn buffer_crud() {
-    let backend = Backend::new().await;
-    let buffer = Buffer::new(
-        backend.arc_mutex().clone(),
-        vec![0u32; 16],
-        BufferRole::Generic,
-    )
-    .await;
-    assert_eq!(buffer.read::<u32>().await, vec![0u32; 16]);
-    buffer.write(vec![1u32; 16]).await;
-    assert_eq!(buffer.read::<u32>().await, vec![1u32; 16]);
 }

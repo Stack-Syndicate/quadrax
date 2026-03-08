@@ -2,20 +2,25 @@
 name = "quadrax"
 version = "0.0.2"
 edition = "2024"
-description = "Weird graphics library."
+description = "A simulation runtime for the insane."
 license-file = "./LICENSE"
 
 [profile.dev]
 opt-level = 1 
 
 [dependencies]
+anyhow = "1.0.102"
 bytemuck = { version = "1.25.0", features = ["derive"] }
-futures = "0.3.32"
+hecs = "0.11.0"
+hex = "0.4.3"
 mlua = { version = "0.11.6", default-features=false, features = ["luau-jit", "vendored"] }
 num-traits = "0.2.19"
 petgraph = { version = "0.8.3", default-features = false }
-pollster = { version = "0.4.0", features = ["macro"] }
+redb = "3.1.0"
+tokio = { version = "1.50.0", features = ["macros", "rt", "rt-multi-thread", "sync"] }
 wgpu = "28.0.0"
 
 [dev-dependencies]
 image = { version = "0.25.9", default-features = true }
+tempfile = "3.26.0"
+

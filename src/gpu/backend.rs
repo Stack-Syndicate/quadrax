@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use futures::lock::Mutex;
+use tokio::sync::Mutex;
 use wgpu::Features;
 
 pub struct Backend {

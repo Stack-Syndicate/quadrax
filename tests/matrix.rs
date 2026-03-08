@@ -1,6 +1,6 @@
-use quadrax::cpu::calculation::maths::matrix::Matrix;
+use quadrax::cpu::maths::matrix::Matrix;
 
-#[pollster::test]
+#[tokio::test]
 async fn matrix_operations_various_shapes() {
     let row1 = Matrix::<3, 1>::new([[1.0, 2.0, 3.0]]);
     let row2 = Matrix::<3, 1>::new([[1.0, 1.0, 1.0]]);

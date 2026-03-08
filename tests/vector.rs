@@ -1,6 +1,6 @@
-use quadrax::cpu::calculation::maths::vector::Vector;
+use quadrax::cpu::maths::vector::Vector;
 
-#[pollster::test]
+#[tokio::test]
 async fn add_prod_dot_cross() {
     let v1 = Vector::new([1.0, 2.0, 3.0]);
     let v2 = Vector::new([1.0; 3]);

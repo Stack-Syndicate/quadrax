@@ -1,4 +1,4 @@
-use crate::cpu::calculation::maths::vector::Vector;
+use crate::cpu::maths::vector::Vector;
 use std::ops::BitOr;
 
 #[derive(Clone, Copy, PartialEq, Debug)]

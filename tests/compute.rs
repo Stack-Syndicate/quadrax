@@ -6,7 +6,8 @@ use quadrax::gpu::{
     backend::Backend,
     buffer::{Buffer, BufferRole},
 };
-#[pollster::test]
+
+#[tokio::test]
 async fn add_one() {
     let backend = Backend::new().await.arc_mutex();
     let input_data: Vec<u32> = vec![0, 1, 2, 3, 4];
